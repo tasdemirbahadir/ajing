@@ -1,0 +1,30 @@
+{
+  "appId": "com.ajing.aidj",
+  "productName": "AI DJ Desktop",
+  "asar": true,
+  "directories": {
+    "output": ".build"
+  },
+  "files": [
+    "desktop/**/*",
+    "src/**/*",
+    "scripts/**/*",
+    "package.json",
+    ".env.example",
+    "README.md"
+  ],
+  "extraMetadata": {
+    "main": "desktop/main.js"
+  },
+  "win": {
+    "signAndEditExecutable": false,
+    "target": [
+      {
+        "target": "portable",
+        "arch": [
+          "x64"
+        ]
+      }
+    ]
+  }
+}

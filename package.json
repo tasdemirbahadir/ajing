@@ -1,0 +1,34 @@
+{
+  "name": "ai-dj-youtube-music",
+  "version": "1.0.0",
+  "description": "AI DJ for private YouTube Music playlists with tempo-aware random transitions",
+  "main": "src/ai-dj.js",
+  "type": "commonjs",
+  "scripts": {
+    "dj": "node src/ai-dj.js",
+    "status": "node src/ai-dj.js --status",
+    "reset": "node src/ai-dj.js --reset",
+    "oauth:youtube": "node scripts/setup-google-oauth.js",
+    "desktop:dev": "electron desktop/main.js",
+    "desktop:build": "node scripts/desktop-build.js"
+  },
+  "keywords": [
+    "youtube-music",
+    "dj",
+    "ffmpeg",
+    "yt-dlp",
+    "nodejs"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "googleapis": "^171.4.0",
+    "music-tempo": "^1.0.3",
+    "ora": "^5.4.1"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  }
+}

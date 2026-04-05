@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI DJ Desktop</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="header">
+        <h1>AI DJ Desktop</h1>
+        <p id="statusLine">Booting...</p>
+      </header>
+
+      <section class="controls">
+        <button id="prepareBtn">Prepare Mix</button>
+        <button id="pauseBtn">Pause</button>
+        <button id="prevBtn">Prev Song</button>
+        <button id="nextBtn">Next Song</button>
+        <button id="exportBtn">Export Mix</button>
+        <button id="resetBtn" class="danger">Reset</button>
+      </section>
+
+      <section class="track-panel">
+        <div class="track-card">
+          <h2>Current Song</h2>
+          <p id="currentTrack">No active track</p>
+        </div>
+        <div class="track-card">
+          <h2>Next Song</h2>
+          <p id="nextTrack">No next track</p>
+        </div>
+      </section>
+
+      <section class="summary">
+        <p id="mixSummary">Preparing mix...</p>
+      </section>
+
+      <section class="position-panel">
+        <div class="position-card">
+          <div class="position-head">
+            <h3>Mix Position</h3>
+            <span id="mixPositionValue">--:-- / --:--</span>
+          </div>
+          <input id="mixPositionSlider" type="range" min="0" max="1" step="0.01" value="0" />
+        </div>
+
+        <div class="position-card">
+          <div class="position-head">
+            <h3>Current Song Position</h3>
+            <span id="trackPositionValue">--:-- / --:--</span>
+          </div>
+          <input id="trackPositionSlider" type="range" min="0" max="1" step="0.01" value="0" />
+        </div>
+      </section>
+
+      <section class="flame-wrap">
+        <h2>Active Flamegraph</h2>
+        <canvas id="flamegraphCanvas" class="flame-canvas"></canvas>
+      </section>
+
+      <section class="console-wrap">
+        <h2>Live Console</h2>
+        <pre id="logOutput" class="console"></pre>
+      </section>
+    </div>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>
