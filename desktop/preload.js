@@ -9,6 +9,9 @@ function subscribe(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld("desktopDJ", {
+  getSettings: () => ipcRenderer.invoke("dj:get-settings"),
+  saveSettings: (options) => ipcRenderer.invoke("dj:save-settings", options || {}),
+  resetSettings: () => ipcRenderer.invoke("dj:reset-settings"),
   prepare: (options) => ipcRenderer.invoke("dj:prepare", options || {}),
   getLatestSession: () => ipcRenderer.invoke("dj:get-latest-session"),
   stopPreparation: () => ipcRenderer.invoke("dj:stop-preparation"),

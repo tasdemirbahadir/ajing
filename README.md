@@ -25,7 +25,7 @@
 												 _||_                    _||_
 												/____\                  /____\
 ```
-
+![alt text](image.png)
 # AI DJ for YouTube Music Playlist
 
 Node.js AI DJ engine for YouTube/YouTube Music playlists with:

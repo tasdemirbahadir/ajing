@@ -13,6 +13,96 @@
         <p id="statusLine">Booting...</p>
       </header>
 
+      <section class="settings-wrap">
+        <div class="settings-head">
+          <h2>Deck Settings</h2>
+          <div class="settings-actions">
+            <button id="saveSettingsBtn" class="accent">Save Settings</button>
+            <button id="resetSettingsBtn">Reset To .env</button>
+          </div>
+        </div>
+
+        <p id="settingsStatus" class="settings-status">Loading settings from .env...</p>
+
+        <div class="settings-grid">
+          <label class="setting-field field-wide">
+            <span>YouTube Playlist ID</span>
+            <input id="cfgGooglePlaylistId" type="text" placeholder="PLxxxxxxxxxxxxxxxx" />
+            <small>
+              Used by YouTube API mode when playlist URL is not provided. Enter the ID part of a playlist.
+            </small>
+          </label>
+
+          <label class="setting-field">
+            <span>Google Client ID</span>
+            <input id="cfgGoogleClientId" type="text" placeholder="...apps.googleusercontent.com" />
+            <small>OAuth app client ID used to fetch private playlist metadata.</small>
+          </label>
+
+          <label class="setting-field">
+            <span>Google Client Secret</span>
+            <input id="cfgGoogleClientSecret" type="password" placeholder="GOCSPX-..." />
+            <small>OAuth app secret paired with client ID for token exchange.</small>
+          </label>
+
+          <label class="setting-field field-wide">
+            <span>Google Refresh Token</span>
+            <input id="cfgGoogleRefreshToken" type="password" placeholder="1//..." />
+            <small>Long-lived token used to request fresh access tokens automatically.</small>
+          </label>
+
+          <label class="setting-field">
+            <span>BPM Sample Seconds</span>
+            <input id="cfgBpmSampleSeconds" type="number" min="10" max="240" step="1" />
+            <small>Audio duration (seconds) analyzed per track for BPM detection.</small>
+          </label>
+
+          <label class="setting-field">
+            <span>Tempo Match Pool Size</span>
+            <input id="cfgTempoMatchPoolSize" type="number" min="1" max="30" step="1" />
+            <small>How many nearest-BPM candidates are considered before random pick.</small>
+          </label>
+
+          <label class="setting-field">
+            <span>Max Tempo Shift Percent</span>
+            <input id="cfgMaxTempoShiftPercent" type="number" min="0" max="50" step="0.1" />
+            <small>Maximum allowed BPM stretch/shrink percentage during tempo matching.</small>
+          </label>
+
+          <label class="setting-field">
+            <span>Min Transition Seconds</span>
+            <input id="cfgMinTransitionSeconds" type="number" min="1" max="180" step="0.1" />
+            <small>Shortest overlap/fade duration allowed between two songs.</small>
+          </label>
+
+          <label class="setting-field">
+            <span>Max Transition Seconds</span>
+            <input id="cfgMaxTransitionSeconds" type="number" min="1" max="180" step="0.1" />
+            <small>Longest overlap/fade duration allowed between two songs.</small>
+          </label>
+
+          <label class="setting-field setting-toggle">
+            <span>Play Audio (CLI Behavior)</span>
+            <input id="cfgPlayAudio" type="checkbox" />
+            <small>
+              Controls standalone CLI playback. Desktop app always handles playback inside the app player.
+            </small>
+          </label>
+
+          <label class="setting-field setting-toggle">
+            <span>Clean Temp After Run</span>
+            <input id="cfgCleanTempAfterRun" type="checkbox" />
+            <small>Deletes temporary stem/mix work files after rendering completes.</small>
+          </label>
+
+          <label class="setting-field setting-toggle">
+            <span>Auto Reset On Start</span>
+            <input id="cfgAutoResetOnStart" type="checkbox" />
+            <small>Automatically marks all tracks as unplayed before each new preparation.</small>
+          </label>
+        </div>
+      </section>
+
       <section class="controls">
         <button id="prepareBtn">Prepare Mix</button>
         <button id="pauseBtn">Pause</button>
@@ -58,6 +148,72 @@
       <section class="flame-wrap">
         <h2>Active Flamegraph</h2>
         <canvas id="flamegraphCanvas" class="flame-canvas"></canvas>
+      </section>
+
+      <section class="fx-deck-wrap">
+        <div class="fx-head">
+          <h3>DJ FX Controls</h3>
+          <div class="fx-head-actions">
+            <p>Slide up/down to shape the sound. Double-click a slider to reset.</p>
+            <button id="resetAllFxBtn" type="button">Reset All FX</button>
+          </div>
+        </div>
+
+        <div class="fx-grid">
+          <div class="fx-card">
+            <span class="fx-name">Sound</span>
+            <span id="fxMasterValue" class="fx-value">+0.0 dB</span>
+            <div class="fx-slider-shell">
+              <input id="fxMasterSlider" class="fx-slider" type="range" min="-48" max="48" step="0.1" value="0" />
+            </div>
+            <small>Overall loudness</small>
+          </div>
+
+          <div class="fx-card">
+            <span class="fx-name">Bass</span>
+            <span id="fxBassValue" class="fx-value">0.0 dB</span>
+            <div class="fx-slider-shell">
+              <input id="fxBassSlider" class="fx-slider" type="range" min="-48" max="48" step="0.1" value="0" />
+            </div>
+            <small>Low-end punch</small>
+          </div>
+
+          <div class="fx-card">
+            <span class="fx-name">Mid</span>
+            <span id="fxMidValue" class="fx-value">0.0 dB</span>
+            <div class="fx-slider-shell">
+              <input id="fxMidSlider" class="fx-slider" type="range" min="-48" max="48" step="0.1" value="0" />
+            </div>
+            <small>Body / vocal zone</small>
+          </div>
+
+          <div class="fx-card">
+            <span class="fx-name">Tiz</span>
+            <span id="fxTrebleValue" class="fx-value">0.0 dB</span>
+            <div class="fx-slider-shell">
+              <input id="fxTrebleSlider" class="fx-slider" type="range" min="-48" max="48" step="0.1" value="0" />
+            </div>
+            <small>High-end shine</small>
+          </div>
+
+          <div class="fx-card">
+            <span class="fx-name">Drive</span>
+            <span id="fxDriveValue" class="fx-value">0%</span>
+            <div class="fx-slider-shell">
+              <input id="fxDriveSlider" class="fx-slider" type="range" min="-400" max="400" step="1" value="0" />
+            </div>
+            <small>Warmth / edge intensity</small>
+          </div>
+
+          <div class="fx-card">
+            <span class="fx-name">Echo</span>
+            <span id="fxEchoValue" class="fx-value">0%</span>
+            <div class="fx-slider-shell">
+              <input id="fxEchoSlider" class="fx-slider" type="range" min="-400" max="400" step="1" value="0" />
+            </div>
+            <small>Delay depth and character</small>
+          </div>
+        </div>
       </section>
 
       <section class="console-wrap">

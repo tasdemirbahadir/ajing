@@ -6,6 +6,18 @@ const mixPositionSlider = document.getElementById("mixPositionSlider");
 const mixPositionValueEl = document.getElementById("mixPositionValue");
 const trackPositionSlider = document.getElementById("trackPositionSlider");
 const trackPositionValueEl = document.getElementById("trackPositionValue");
+const fxMasterSlider = document.getElementById("fxMasterSlider");
+const fxMasterValueEl = document.getElementById("fxMasterValue");
+const fxBassSlider = document.getElementById("fxBassSlider");
+const fxBassValueEl = document.getElementById("fxBassValue");
+const fxMidSlider = document.getElementById("fxMidSlider");
+const fxMidValueEl = document.getElementById("fxMidValue");
+const fxTrebleSlider = document.getElementById("fxTrebleSlider");
+const fxTrebleValueEl = document.getElementById("fxTrebleValue");
+const fxDriveSlider = document.getElementById("fxDriveSlider");
+const fxDriveValueEl = document.getElementById("fxDriveValue");
+const fxEchoSlider = document.getElementById("fxEchoSlider");
+const fxEchoValueEl = document.getElementById("fxEchoValue");
 const logEl = document.getElementById("logOutput");
 const flameCanvas = document.getElementById("flamegraphCanvas");
 const flameCtx = flameCanvas ? flameCanvas.getContext("2d") : null;
@@ -16,6 +28,26 @@ const prevBtn = document.getElementById("prevBtn");
 const nextBtn = document.getElementById("nextBtn");
 const exportBtn = document.getElementById("exportBtn");
 const resetBtn = document.getElementById("resetBtn");
+const saveSettingsBtn = document.getElementById("saveSettingsBtn");
+const resetSettingsBtn = document.getElementById("resetSettingsBtn");
+const settingsStatusEl = document.getElementById("settingsStatus");
+const resetAllFxBtn = document.getElementById("resetAllFxBtn");
+
+const settingsFields = {
+  GOOGLE_PLAYLIST_ID: document.getElementById("cfgGooglePlaylistId"),
+  GOOGLE_CLIENT_ID: document.getElementById("cfgGoogleClientId"),
+  GOOGLE_CLIENT_SECRET: document.getElementById("cfgGoogleClientSecret"),
+  GOOGLE_REFRESH_TOKEN: document.getElementById("cfgGoogleRefreshToken"),
+  BPM_SAMPLE_SECONDS: document.getElementById("cfgBpmSampleSeconds"),
+  TEMPO_MATCH_POOL_SIZE: document.getElementById("cfgTempoMatchPoolSize"),
+  MAX_TEMPO_SHIFT_PERCENT: document.getElementById("cfgMaxTempoShiftPercent"),
+  MIN_TRANSITION_SECONDS: document.getElementById("cfgMinTransitionSeconds"),
+  MAX_TRANSITION_SECONDS: document.getElementById("cfgMaxTransitionSeconds"),
+  PLAY_AUDIO: document.getElementById("cfgPlayAudio"),
+  CLEAN_TEMP_AFTER_RUN: document.getElementById("cfgCleanTempAfterRun"),
+  AUTO_RESET_ON_START: document.getElementById("cfgAutoResetOnStart"),
+};
+const settingsFieldEntries = Object.entries(settingsFields);
 
 let session = null;
 let preparing = false;
@@ -35,10 +67,35 @@ let currentAudioFile = "";
 let audioContext = null;
 let analyserNode = null;
 let mediaSourceNode = null;
+let fxNodes = null;
 let frequencyData = null;
 let flameLevels = [];
 let isScrubbingMix = false;
 let isScrubbingTrack = false;
+let settingsState = null;
+let settingsDirty = false;
+
+const FX_DEFAULTS = {
+  master: 0,
+  bass: 0,
+  mid: 0,
+  treble: 0,
+  drive: 0,
+  echo: 0,
+};
+
+const fxValues = {
+  ...FX_DEFAULTS,
+};
+
+const fxControlDefs = [
+  { key: "master", slider: fxMasterSlider, valueEl: fxMasterValueEl, defaultValue: FX_DEFAULTS.master },
+  { key: "bass", slider: fxBassSlider, valueEl: fxBassValueEl, defaultValue: FX_DEFAULTS.bass },
+  { key: "mid", slider: fxMidSlider, valueEl: fxMidValueEl, defaultValue: FX_DEFAULTS.mid },
+  { key: "treble", slider: fxTrebleSlider, valueEl: fxTrebleValueEl, defaultValue: FX_DEFAULTS.treble },
+  { key: "drive", slider: fxDriveSlider, valueEl: fxDriveValueEl, defaultValue: FX_DEFAULTS.drive },
+  { key: "echo", slider: fxEchoSlider, valueEl: fxEchoValueEl, defaultValue: FX_DEFAULTS.echo },
+];
 
 function setStatus(message) {
   statusEl.textContent = message;
@@ -65,6 +122,228 @@ function formatDuration(sec) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function formatFxValue(key, value) {
+  const numeric = Number(value || 0);
+  const sign = numeric > 0 ? "+" : "";
+
+  if (key === "drive" || key === "echo") {
+    return `${sign}${Math.round(numeric)}%`;
+  }
+
+  return `${sign}${numeric.toFixed(1)} dB`;
+}
+
+function buildDistortionCurve(amount) {
+  const safe = Math.max(0, Number(amount || 0));
+  if (safe <= 0.0001) {
+    return null;
+  }
+
+  const samples = 2048;
+  const curve = new Float32Array(samples);
+  const deg = Math.PI / 180;
+
+  for (let i = 0; i < samples; i += 1) {
+    const x = (i * 2) / samples - 1;
+    curve[i] = ((3 + safe) * x * 20 * deg) / (Math.PI + safe * Math.abs(x));
+  }
+
+  return curve;
+}
+
+function applyFxValuesToNodes() {
+  if (!audioContext || !fxNodes) {
+    return;
+  }
+
+  const now = audioContext.currentTime;
+
+  const masterDb = clamp(Number(fxValues.master || 0), -48, 48);
+  const bass = clamp(Number(fxValues.bass || 0), -48, 48);
+  const mid = clamp(Number(fxValues.mid || 0), -48, 48);
+  const treble = clamp(Number(fxValues.treble || 0), -48, 48);
+  const driveSigned = clamp(Number(fxValues.drive || 0), -400, 400);
+  const echoSigned = clamp(Number(fxValues.echo || 0), -400, 400);
+
+  const masterLinear = clamp(Math.pow(10, masterDb / 40), 0.02, 8);
+
+  fxNodes.masterGain.gain.setTargetAtTime(masterLinear, now, 0.03);
+  fxNodes.bassFilter.gain.setTargetAtTime(bass, now, 0.03);
+  fxNodes.midFilter.gain.setTargetAtTime(mid, now, 0.03);
+  fxNodes.trebleFilter.gain.setTargetAtTime(treble, now, 0.03);
+
+  const driveAmount = Math.abs(driveSigned) / 400;
+  if (driveAmount <= 0.0001) {
+    fxNodes.drivePreGain.gain.setTargetAtTime(1, now, 0.03);
+    fxNodes.drivePostGain.gain.setTargetAtTime(1, now, 0.03);
+    fxNodes.driveShaper.curve = null;
+  } else if (driveSigned >= 0) {
+    fxNodes.drivePreGain.gain.setTargetAtTime(1 + driveAmount * 5.4, now, 0.03);
+    fxNodes.drivePostGain.gain.setTargetAtTime(1 / (1 + driveAmount * 2.5), now, 0.03);
+    fxNodes.driveShaper.curve = buildDistortionCurve(30 + driveAmount * 620);
+  } else {
+    fxNodes.drivePreGain.gain.setTargetAtTime(1 + driveAmount * 1.6, now, 0.03);
+    fxNodes.drivePostGain.gain.setTargetAtTime(1 / (1 + driveAmount * 0.9), now, 0.03);
+    fxNodes.driveShaper.curve = buildDistortionCurve(12 + driveAmount * 220);
+  }
+
+  const echoAmount = Math.abs(echoSigned) / 400;
+  const echoFeedback = echoAmount <= 0.0001 ? 0 : clamp(0.06 + echoAmount * 0.74, 0, 0.82);
+  const echoDelaySec = echoSigned >= 0 ? 0.14 + echoAmount * 0.55 : 0.05 + echoAmount * 0.24;
+  const echoWetLevel = (echoSigned >= 0 ? 1 : -1) * echoAmount * 0.72;
+  const echoDryLevel = clamp(1 - echoAmount * 0.36, 0.4, 1);
+
+  fxNodes.echoDelay.delayTime.setTargetAtTime(echoDelaySec, now, 0.03);
+  fxNodes.echoFeedbackGain.gain.setTargetAtTime(echoFeedback, now, 0.03);
+  fxNodes.echoWetGain.gain.setTargetAtTime(echoWetLevel, now, 0.03);
+  fxNodes.echoDryGain.gain.setTargetAtTime(echoDryLevel, now, 0.03);
+}
+
+function setFxValue(key, nextValue) {
+  const control = fxControlDefs.find((item) => item.key === key);
+  if (!control || !control.slider) {
+    return;
+  }
+
+  const min = Number(control.slider.min || 0);
+  const max = Number(control.slider.max || 100);
+  const safeValue = clamp(Number(nextValue), min, max);
+
+  control.slider.value = String(safeValue);
+  fxValues[key] = safeValue;
+  if (control.valueEl) {
+    control.valueEl.textContent = formatFxValue(key, safeValue);
+  }
+
+  applyFxValuesToNodes();
+}
+
+function resetFxValue(key) {
+  const control = fxControlDefs.find((item) => item.key === key);
+  if (!control) {
+    return;
+  }
+
+  setFxValue(key, control.defaultValue);
+}
+
+function resetAllFxValues() {
+  for (const control of fxControlDefs) {
+    resetFxValue(control.key);
+  }
+}
+
+function syncFxFromUi() {
+  for (const control of fxControlDefs) {
+    if (!control.slider) {
+      continue;
+    }
+
+    const raw = Number(control.slider.value);
+    const fallback = Number(control.defaultValue);
+    const value = Number.isFinite(raw) ? raw : fallback;
+    fxValues[control.key] = value;
+    if (control.valueEl) {
+      control.valueEl.textContent = formatFxValue(control.key, value);
+    }
+  }
+
+  applyFxValuesToNodes();
+}
+
+function setSettingsStatus(message, tone = "info") {
+  if (!settingsStatusEl) {
+    return;
+  }
+
+  settingsStatusEl.textContent = message;
+  settingsStatusEl.dataset.tone = tone;
+}
+
+function coerceNumberFromInput(value, fallback) {
+  const parsed = Number.parseFloat(String(value));
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function applySettingsToForm(settings) {
+  settingsState = { ...settings };
+
+  for (const [key, input] of settingsFieldEntries) {
+    if (!input) {
+      continue;
+    }
+
+    const value = settings[key];
+    if (input.type === "checkbox") {
+      input.checked = Boolean(value);
+      continue;
+    }
+
+    input.value = value === undefined || value === null ? "" : String(value);
+  }
+
+  settingsDirty = false;
+}
+
+function collectSettingsFromForm() {
+  const payload = {
+    GOOGLE_PLAYLIST_ID: String(settingsFields.GOOGLE_PLAYLIST_ID.value || "").trim(),
+    GOOGLE_CLIENT_ID: String(settingsFields.GOOGLE_CLIENT_ID.value || "").trim(),
+    GOOGLE_CLIENT_SECRET: String(settingsFields.GOOGLE_CLIENT_SECRET.value || "").trim(),
+    GOOGLE_REFRESH_TOKEN: String(settingsFields.GOOGLE_REFRESH_TOKEN.value || "").trim(),
+    BPM_SAMPLE_SECONDS: Math.round(coerceNumberFromInput(settingsFields.BPM_SAMPLE_SECONDS.value, 35)),
+    TEMPO_MATCH_POOL_SIZE: Math.round(coerceNumberFromInput(settingsFields.TEMPO_MATCH_POOL_SIZE.value, 5)),
+    MAX_TEMPO_SHIFT_PERCENT: Number(coerceNumberFromInput(settingsFields.MAX_TEMPO_SHIFT_PERCENT.value, 8).toFixed(3)),
+    MIN_TRANSITION_SECONDS: Number(coerceNumberFromInput(settingsFields.MIN_TRANSITION_SECONDS.value, 20).toFixed(3)),
+    MAX_TRANSITION_SECONDS: Number(coerceNumberFromInput(settingsFields.MAX_TRANSITION_SECONDS.value, 30).toFixed(3)),
+    PLAY_AUDIO: Boolean(settingsFields.PLAY_AUDIO.checked),
+    CLEAN_TEMP_AFTER_RUN: Boolean(settingsFields.CLEAN_TEMP_AFTER_RUN.checked),
+    AUTO_RESET_ON_START: Boolean(settingsFields.AUTO_RESET_ON_START.checked),
+  };
+
+  payload.MAX_TRANSITION_SECONDS = Math.max(payload.MIN_TRANSITION_SECONDS, payload.MAX_TRANSITION_SECONDS);
+  return payload;
+}
+
+function handleSettingsFieldChange() {
+  settingsDirty = true;
+  setSettingsStatus("Unsaved changes. Save to apply settings for the next mix preparation.", "warn");
+  refreshButtons();
+}
+
+async function loadSettingsFromBackend() {
+  const result = await window.desktopDJ.getSettings();
+  applySettingsToForm(result.settings || {});
+
+  if (result.loadedEnvFiles && result.loadedEnvFiles.length) {
+    setSettingsStatus("Settings loaded from .env and saved desktop profile.", "ok");
+  } else {
+    setSettingsStatus("No .env found. Using saved/default desktop settings.", "info");
+  }
+
+  refreshButtons();
+}
+
+async function saveSettingsFromForm() {
+  const payload = collectSettingsFromForm();
+  const result = await window.desktopDJ.saveSettings({ settings: payload });
+  applySettingsToForm(result.settings || payload);
+  setSettingsStatus("Settings saved. Next preparation run will use these values.", "ok");
+  appendLog("Settings saved from desktop panel.", "system");
+  refreshButtons();
+}
+
+async function resetSettingsToEnv() {
+  const result = await window.desktopDJ.resetSettings();
+  applySettingsToForm(result.settings || {});
+  setSettingsStatus("Settings reset to .env/default values.", "ok");
+  appendLog("Settings reset to .env/default values.", "system");
+  refreshButtons();
 }
 
 function getSessionAudioUrl(targetSession) {
@@ -115,13 +394,68 @@ async function ensureVisualizerNodes() {
 
   if (!mediaSourceNode) {
     mediaSourceNode = audioContext.createMediaElementSource(mixAudio);
+
+    const bassFilter = audioContext.createBiquadFilter();
+    bassFilter.type = "lowshelf";
+    bassFilter.frequency.value = 140;
+
+    const midFilter = audioContext.createBiquadFilter();
+    midFilter.type = "peaking";
+    midFilter.frequency.value = 1200;
+    midFilter.Q.value = 0.8;
+
+    const trebleFilter = audioContext.createBiquadFilter();
+    trebleFilter.type = "highshelf";
+    trebleFilter.frequency.value = 6800;
+
+    const drivePreGain = audioContext.createGain();
+    const driveShaper = audioContext.createWaveShaper();
+    driveShaper.oversample = "4x";
+    const drivePostGain = audioContext.createGain();
+    const echoDelay = audioContext.createDelay(1.5);
+    const echoFeedbackGain = audioContext.createGain();
+    const echoWetGain = audioContext.createGain();
+    const echoDryGain = audioContext.createGain();
+    const masterGain = audioContext.createGain();
+
     analyserNode = audioContext.createAnalyser();
     analyserNode.fftSize = 1024;
     analyserNode.smoothingTimeConstant = 0.82;
 
-    mediaSourceNode.connect(analyserNode);
+    mediaSourceNode.connect(bassFilter);
+    bassFilter.connect(midFilter);
+    midFilter.connect(trebleFilter);
+    trebleFilter.connect(drivePreGain);
+    drivePreGain.connect(driveShaper);
+    driveShaper.connect(drivePostGain);
+    drivePostGain.connect(echoDryGain);
+    drivePostGain.connect(echoDelay);
+
+    echoDelay.connect(echoWetGain);
+    echoDelay.connect(echoFeedbackGain);
+    echoFeedbackGain.connect(echoDelay);
+
+    echoDryGain.connect(masterGain);
+    echoWetGain.connect(masterGain);
+    masterGain.connect(analyserNode);
     analyserNode.connect(audioContext.destination);
+
+    fxNodes = {
+      bassFilter,
+      midFilter,
+      trebleFilter,
+      drivePreGain,
+      driveShaper,
+      drivePostGain,
+      echoDelay,
+      echoFeedbackGain,
+      echoWetGain,
+      echoDryGain,
+      masterGain,
+    };
+
     frequencyData = new Uint8Array(analyserNode.frequencyBinCount);
+    syncFxFromUi();
   }
 
   if (audioContext.state === "suspended") {
@@ -512,6 +846,7 @@ function refreshButtons() {
   const canControlPlayback = hasSession && hasPlaybackSource;
   const canExportMix = Boolean(session && session.outputFile);
   const hasCurrentTrack = Boolean(hasSession && currentIndex >= 0 && currentIndex < session.tracks.length);
+  const hasSettingsLoaded = Boolean(settingsState);
   const isBusy = preparing;
 
   prepareBtn.disabled = isBusy;
@@ -522,6 +857,15 @@ function refreshButtons() {
   exportBtn.disabled = isBusy || !canExportMix;
   mixPositionSlider.disabled = isBusy || !canControlPlayback;
   trackPositionSlider.disabled = isBusy || !canControlPlayback || !hasCurrentTrack;
+  saveSettingsBtn.disabled = isBusy || !hasSettingsLoaded || !settingsDirty;
+  resetSettingsBtn.disabled = isBusy || !hasSettingsLoaded;
+
+  for (const [, input] of settingsFieldEntries) {
+    if (!input) {
+      continue;
+    }
+    input.disabled = isBusy;
+  }
 
   pauseBtn.textContent = playback.paused ? "Play" : "Pause";
 }
@@ -533,6 +877,7 @@ async function prepareAndPlay(options = {}) {
 
   preparing = true;
   refreshButtons();
+  setSettingsStatus("Mix preparation is running. Settings are locked until it finishes.", "info");
 
   const isReset = Boolean(options.reset);
   const hasCachedSession = Boolean(session && session.outputFile);
@@ -582,9 +927,74 @@ async function prepareAndPlay(options = {}) {
     appendLog(err.message, "stderr");
   } finally {
     preparing = false;
+    if (settingsDirty) {
+      setSettingsStatus("Preparation finished. You can edit settings now and save changes.", "warn");
+    } else {
+      setSettingsStatus("Preparation finished. Settings are now editable.", "ok");
+    }
     refreshButtons();
   }
 }
+
+for (const [, input] of settingsFieldEntries) {
+  if (!input) {
+    continue;
+  }
+
+  const eventName = input.type === "checkbox" ? "change" : "input";
+  input.addEventListener(eventName, handleSettingsFieldChange);
+}
+
+saveSettingsBtn.addEventListener("click", async () => {
+  if (preparing || !settingsDirty) {
+    return;
+  }
+
+  try {
+    await saveSettingsFromForm();
+  } catch (err) {
+    setSettingsStatus(`Failed to save settings: ${err.message}`, "error");
+    appendLog(`Settings save failed: ${err.message}`, "stderr");
+  }
+});
+
+resetSettingsBtn.addEventListener("click", async () => {
+  if (preparing) {
+    return;
+  }
+
+  try {
+    await resetSettingsToEnv();
+  } catch (err) {
+    setSettingsStatus(`Failed to reset settings: ${err.message}`, "error");
+    appendLog(`Settings reset failed: ${err.message}`, "stderr");
+  }
+});
+
+for (const control of fxControlDefs) {
+  if (!control.slider) {
+    continue;
+  }
+
+  control.slider.addEventListener("input", () => {
+    setFxValue(control.key, Number(control.slider.value));
+  });
+
+  control.slider.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    resetFxValue(control.key);
+    appendLog(`FX reset: ${control.key}`, "system");
+  });
+}
+
+if (resetAllFxBtn) {
+  resetAllFxBtn.addEventListener("click", () => {
+    resetAllFxValues();
+    appendLog("FX reset: all controls", "system");
+  });
+}
+
+syncFxFromUi();
 
 prepareBtn.addEventListener("click", () => prepareAndPlay({ reset: false }));
 resetBtn.addEventListener("click", () => prepareAndPlay({ reset: true }));
@@ -773,7 +1183,14 @@ window.desktopDJ.onPlaybackState((payload) => {
     flameRaf = window.requestAnimationFrame(flamegraphLoop);
   }
 
-  setStatus("Desktop app ready. Loading cached session...");
+  setStatus("Desktop app ready. Loading settings and cached session...");
+
+  try {
+    await loadSettingsFromBackend();
+  } catch (err) {
+    setSettingsStatus(`Could not load settings: ${err.message}`, "error");
+    appendLog(`Settings load failed: ${err.message}`, "stderr");
+  }
 
   const latestSession = await window.desktopDJ.getLatestSession();
   const latestPlayback = await window.desktopDJ.playbackGetState();

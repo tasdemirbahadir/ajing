@@ -26,6 +26,181 @@ let playbackState = {
   ended: false,
 };
 
+const DESKTOP_SETTINGS_VERSION = 1;
+const DESKTOP_SETTING_DEFINITIONS = [
+  { key: "GOOGLE_PLAYLIST_ID", type: "string", defaultValue: "" },
+  { key: "GOOGLE_CLIENT_ID", type: "string", defaultValue: "" },
+  { key: "GOOGLE_CLIENT_SECRET", type: "string", defaultValue: "" },
+  { key: "GOOGLE_REFRESH_TOKEN", type: "string", defaultValue: "" },
+  { key: "BPM_SAMPLE_SECONDS", type: "int", defaultValue: 35, min: 10, max: 240 },
+  { key: "TEMPO_MATCH_POOL_SIZE", type: "int", defaultValue: 5, min: 1, max: 30 },
+  { key: "MAX_TEMPO_SHIFT_PERCENT", type: "number", defaultValue: 8, min: 0, max: 50 },
+  { key: "MIN_TRANSITION_SECONDS", type: "number", defaultValue: 20, min: 1, max: 180 },
+  { key: "MAX_TRANSITION_SECONDS", type: "number", defaultValue: 30, min: 1, max: 180 },
+  { key: "PLAY_AUDIO", type: "bool", defaultValue: true },
+  { key: "CLEAN_TEMP_AFTER_RUN", type: "bool", defaultValue: false },
+  { key: "AUTO_RESET_ON_START", type: "bool", defaultValue: false },
+];
+
+function parseBooleanSetting(rawValue, fallbackValue) {
+  if (typeof rawValue === "boolean") {
+    return rawValue;
+  }
+
+  if (typeof rawValue === "number") {
+    return rawValue !== 0;
+  }
+
+  const text = String(rawValue ?? "").trim().toLowerCase();
+  if (!text) {
+    return fallbackValue;
+  }
+
+  if (["1", "true", "yes", "on"].includes(text)) {
+    return true;
+  }
+
+  if (["0", "false", "no", "off"].includes(text)) {
+    return false;
+  }
+
+  return fallbackValue;
+}
+
+function normalizeSettingValue(definition, rawValue, fallbackValue) {
+  if (definition.type === "bool") {
+    return parseBooleanSetting(rawValue, Boolean(fallbackValue));
+  }
+
+  if (definition.type === "string") {
+    if (rawValue === undefined || rawValue === null) {
+      return String(fallbackValue ?? "").trim();
+    }
+    return String(rawValue).trim();
+  }
+
+  if (definition.type === "int") {
+    const parsed = Number.parseInt(String(rawValue), 10);
+    const fallback = Number.parseInt(String(fallbackValue), 10);
+    const safe = Number.isFinite(parsed) ? parsed : Number.isFinite(fallback) ? fallback : Number(definition.defaultValue);
+    const min = Number(definition.min ?? safe);
+    const max = Number(definition.max ?? safe);
+    return Math.round(Math.max(min, Math.min(max, safe)));
+  }
+
+  if (definition.type === "number") {
+    const parsed = Number.parseFloat(String(rawValue));
+    const fallback = Number.parseFloat(String(fallbackValue));
+    const safe = Number.isFinite(parsed)
+      ? parsed
+      : Number.isFinite(fallback)
+        ? fallback
+        : Number(definition.defaultValue);
+    const min = Number(definition.min ?? safe);
+    const max = Number(definition.max ?? safe);
+    return Number(Math.max(min, Math.min(max, safe)).toFixed(3));
+  }
+
+  return rawValue;
+}
+
+function buildDefaultDesktopSettings() {
+  const settings = {};
+  for (const definition of DESKTOP_SETTING_DEFINITIONS) {
+    settings[definition.key] = definition.defaultValue;
+  }
+  return settings;
+}
+
+function normalizeDesktopSettingsFromInput(inputValues = {}, fallbackValues = {}) {
+  const settings = {};
+  for (const definition of DESKTOP_SETTING_DEFINITIONS) {
+    const fallbackValue = Object.prototype.hasOwnProperty.call(fallbackValues, definition.key)
+      ? fallbackValues[definition.key]
+      : definition.defaultValue;
+
+    const hasInputValue = Object.prototype.hasOwnProperty.call(inputValues, definition.key);
+    const rawValue = hasInputValue ? inputValues[definition.key] : fallbackValue;
+    settings[definition.key] = normalizeSettingValue(definition, rawValue, fallbackValue);
+  }
+
+  settings.MAX_TRANSITION_SECONDS = Math.max(settings.MIN_TRANSITION_SECONDS, settings.MAX_TRANSITION_SECONDS);
+  return settings;
+}
+
+function buildDesktopSettingsFromEnvValues(envValues) {
+  const defaults = buildDefaultDesktopSettings();
+  return normalizeDesktopSettingsFromInput(envValues || {}, defaults);
+}
+
+function getDesktopSettingsFilePath() {
+  return resolveRuntimePaths().desktopSettingsFile;
+}
+
+function loadDesktopSettingsSync() {
+  const dotenvData = loadDotenvFromCandidates();
+  const envSettings = buildDesktopSettingsFromEnvValues(dotenvData.values);
+  const settingsFilePath = getDesktopSettingsFilePath();
+
+  let persistedValues = {};
+  if (fs.existsSync(settingsFilePath)) {
+    try {
+      const raw = fs.readFileSync(settingsFilePath, "utf8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        persistedValues = parsed.values && typeof parsed.values === "object" ? parsed.values : parsed;
+      }
+    } catch {
+      persistedValues = {};
+    }
+  }
+
+  const mergedSettings = normalizeDesktopSettingsFromInput(persistedValues, envSettings);
+  return {
+    settings: mergedSettings,
+    loadedEnvFiles: dotenvData.loadedFrom,
+    envCandidates: dotenvData.candidates,
+    envValues: dotenvData.values,
+    settingsFilePath,
+  };
+}
+
+function persistDesktopSettingsSync(settings) {
+  const filePath = getDesktopSettingsFilePath();
+  const payload = {
+    version: DESKTOP_SETTINGS_VERSION,
+    updatedAt: new Date().toISOString(),
+    values: settings,
+  };
+
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf8");
+}
+
+function resetDesktopSettingsSync() {
+  const filePath = getDesktopSettingsFilePath();
+  if (fs.existsSync(filePath)) {
+    fs.rmSync(filePath, { force: true });
+  }
+
+  return loadDesktopSettingsSync();
+}
+
+function buildSettingsEnvOverrides(settings) {
+  const overrides = {};
+  for (const definition of DESKTOP_SETTING_DEFINITIONS) {
+    const value = settings[definition.key];
+    if (definition.type === "bool") {
+      overrides[definition.key] = value ? "true" : "false";
+      continue;
+    }
+
+    overrides[definition.key] = String(value ?? "");
+  }
+
+  return overrides;
+}
+
 function resolvePortableExecutableDir() {
   const portableDir = String(process.env.PORTABLE_EXECUTABLE_DIR || "").trim();
   if (portableDir) {
@@ -564,6 +739,7 @@ function resolveRuntimePaths() {
       outputFile: path.join(cacheDir, "output", "ai-dj-mix.wav"),
       sessionFile: path.join(cacheDir, "output", "ai-dj-session.json"),
       playbackStateFile: path.join(cacheDir, "output", "desktop-playback-state.json"),
+      desktopSettingsFile: path.join(cacheDir, "desktop-settings.json"),
     };
   }
 
@@ -576,16 +752,19 @@ function resolveRuntimePaths() {
     outputFile: path.join(cacheDir, "output", "ai-dj-mix.wav"),
     sessionFile: path.join(cacheDir, "output", "ai-dj-session.json"),
     playbackStateFile: path.join(cacheDir, "output", "desktop-playback-state.json"),
+    desktopSettingsFile: path.join(cacheDir, "desktop-settings.json"),
   };
 }
 
 function buildChildEnv() {
   const runtime = resolveRuntimePaths();
-  const dotenvData = loadDotenvFromCandidates();
+  const settingsData = loadDesktopSettingsSync();
+  const settingOverrides = buildSettingsEnvOverrides(settingsData.settings);
 
   const env = {
     ...process.env,
-    ...dotenvData.values,
+    ...settingsData.envValues,
+    ...settingOverrides,
     ELECTRON_RUN_AS_NODE: "1",
     PLAY_AUDIO: "false",
     MARK_PLAYED_WHEN_NOT_PLAYING: "false",
@@ -599,8 +778,8 @@ function buildChildEnv() {
   return {
     env,
     runtime,
-    loadedEnvFiles: dotenvData.loadedFrom,
-    envCandidates: dotenvData.candidates,
+    loadedEnvFiles: settingsData.loadedEnvFiles,
+    envCandidates: settingsData.envCandidates,
   };
 }
 
@@ -708,6 +887,45 @@ function runDjPreparation({ reset }) {
     });
   });
 }
+
+ipcMain.handle("dj:get-settings", async () => {
+  const data = loadDesktopSettingsSync();
+  return {
+    settings: data.settings,
+    loadedEnvFiles: data.loadedEnvFiles,
+    settingsFilePath: data.settingsFilePath,
+  };
+});
+
+ipcMain.handle("dj:save-settings", async (_event, options = {}) => {
+  if (activeDjProcess) {
+    throw new Error("Cannot change settings while mix preparation is in progress.");
+  }
+
+  const current = loadDesktopSettingsSync();
+  const incoming = options && typeof options.settings === "object" ? options.settings : {};
+  const nextSettings = normalizeDesktopSettingsFromInput(incoming, current.settings);
+
+  persistDesktopSettingsSync(nextSettings);
+
+  return {
+    settings: nextSettings,
+    settingsFilePath: current.settingsFilePath,
+  };
+});
+
+ipcMain.handle("dj:reset-settings", async () => {
+  if (activeDjProcess) {
+    throw new Error("Cannot reset settings while mix preparation is in progress.");
+  }
+
+  const data = resetDesktopSettingsSync();
+  return {
+    settings: data.settings,
+    loadedEnvFiles: data.loadedEnvFiles,
+    settingsFilePath: data.settingsFilePath,
+  };
+});
 
 ipcMain.handle("dj:prepare", async (_event, options = {}) => {
   const reset = Boolean(options && options.reset);
