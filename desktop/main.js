@@ -16,6 +16,13 @@ let activeDjProcess = null;
 let ffplayProcess = null;
 let playbackTicker = null;
 let playbackPersistTimer = null;
+const LOG_STREAMS = ["stdout", "stderr", "system"];
+const LOG_BUFFER_FLUSH_AT = 180;
+const logStreamBuffers = {
+  stdout: "",
+  stderr: "",
+  system: "",
+};
 const PLAYBACK_STATE_VERSION = 1;
 let playbackState = {
   filePath: "",
@@ -239,7 +246,7 @@ function createMainWindow() {
     minWidth: 900,
     minHeight: 640,
     autoHideMenuBar: true,
-    title: "AI DJ Desktop",
+    title: "AJING - AI DJ Desktop",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -260,19 +267,58 @@ function broadcast(channel, payload) {
   }
 }
 
+function normalizeLogStream(stream) {
+  if (stream === "stderr") {
+    return "stderr";
+  }
+  if (stream === "system") {
+    return "system";
+  }
+  return "stdout";
+}
+
+function emitLogLine(stream, rawLine) {
+  const line = String(rawLine || "").trimEnd();
+  if (!line) {
+    return;
+  }
+
+  broadcast("dj:log", {
+    stream,
+    line,
+    at: new Date().toISOString(),
+  });
+}
+
+function flushLogBuffer(stream) {
+  const streamKey = normalizeLogStream(stream);
+  const pending = String(logStreamBuffers[streamKey] || "").trimEnd();
+  if (!pending) {
+    return;
+  }
+
+  logStreamBuffers[streamKey] = "";
+  emitLogLine(streamKey, pending);
+}
+
 function pushLog(stream, rawText) {
+  const streamKey = normalizeLogStream(stream);
   const text = String(rawText || "");
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trimEnd())
-    .filter((line) => line.length > 0);
+  if (!text) {
+    return;
+  }
+
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const merged = `${logStreamBuffers[streamKey]}${normalized}`;
+  const lines = merged.split("\n");
+  logStreamBuffers[streamKey] = lines.pop() || "";
 
   for (const line of lines) {
-    broadcast("dj:log", {
-      stream,
-      line,
-      at: new Date().toISOString(),
-    });
+    emitLogLine(streamKey, line);
+  }
+
+  if (logStreamBuffers[streamKey].length >= LOG_BUFFER_FLUSH_AT) {
+    flushLogBuffer(streamKey);
   }
 }
 
@@ -846,11 +892,17 @@ function runDjPreparation({ reset }) {
     child.stderr.on("data", (chunk) => pushLog("stderr", chunk.toString("utf8")));
 
     child.on("error", (err) => {
+      for (const stream of LOG_STREAMS) {
+        flushLogBuffer(stream);
+      }
       activeDjProcess = null;
       reject(err);
     });
 
     child.on("close", async (code) => {
+      for (const stream of LOG_STREAMS) {
+        flushLogBuffer(stream);
+      }
       activeDjProcess = null;
 
       if (code !== 0) {

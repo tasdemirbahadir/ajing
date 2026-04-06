@@ -1,6 +1,6 @@
 {
   "appId": "com.ajing.aidj",
-  "productName": "AI DJ Desktop",
+  "productName": "AJING - AI DJ Desktop",
   "asar": true,
   "directories": {
     "output": ".build"

@@ -52,7 +52,12 @@ const settingsFieldEntries = Object.entries(settingsFields);
 let session = null;
 let preparing = false;
 let currentIndex = -1;
-const maxLogLines = 600;
+const maxLogLines = 2000;
+const LOG_FOLLOW_THRESHOLD_PX = 24;
+const logLineBuffer = [];
+const logLines = [];
+let logFlushRaf = 0;
+let logAutoFollow = true;
 let playback = {
   positionSec: 0,
   paused: true,
@@ -101,13 +106,63 @@ function setStatus(message) {
   statusEl.textContent = message;
 }
 
+function isLogNearBottom() {
+  if (!logEl) {
+    return true;
+  }
+
+  return logEl.scrollHeight - (logEl.scrollTop + logEl.clientHeight) <= LOG_FOLLOW_THRESHOLD_PX;
+}
+
+function flushLogBuffer() {
+  logFlushRaf = 0;
+
+  if (!logEl || logLineBuffer.length === 0) {
+    return;
+  }
+
+  const shouldFollow = logAutoFollow || isLogNearBottom();
+  for (const bufferedLine of logLineBuffer) {
+    logLines.push(bufferedLine);
+  }
+  logLineBuffer.length = 0;
+
+  if (logLines.length > maxLogLines) {
+    logLines.splice(0, logLines.length - maxLogLines);
+  }
+
+  logEl.textContent = logLines.join("\n");
+  if (shouldFollow) {
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}
+
+function scheduleLogFlush() {
+  if (logFlushRaf) {
+    return;
+  }
+
+  logFlushRaf = window.requestAnimationFrame(flushLogBuffer);
+}
+
 function appendLog(line, stream = "stdout") {
   const prefix = stream === "stderr" ? "[ERR]" : stream === "system" ? "[SYS]" : "[OUT]";
-  const existing = logEl.textContent.split(/\r?\n/).filter(Boolean);
-  existing.push(`${new Date().toLocaleTimeString()} ${prefix} ${line}`);
-  const sliced = existing.slice(Math.max(0, existing.length - maxLogLines));
-  logEl.textContent = sliced.join("\n");
-  logEl.scrollTop = logEl.scrollHeight;
+  const timestamp = new Date().toLocaleTimeString();
+  const text = String(line || "");
+  const pieces = text
+    .split(/\r?\n/)
+    .map((item) => item.trimEnd())
+    .filter((item) => item.length > 0);
+
+  if (pieces.length === 0) {
+    return;
+  }
+
+  for (const piece of pieces) {
+    logLineBuffer.push(`${timestamp} ${prefix} ${piece}`);
+  }
+
+  scheduleLogFlush();
 }
 
 function formatDuration(sec) {
@@ -129,10 +184,10 @@ function formatFxValue(key, value) {
   const sign = numeric > 0 ? "+" : "";
 
   if (key === "drive" || key === "echo") {
-    return `${sign}${Math.round(numeric)}%`;
+    return `${sign}${numeric.toFixed(2)}%`;
   }
 
-  return `${sign}${numeric.toFixed(1)} dB`;
+  return `${sign}${numeric.toFixed(2)} dB`;
 }
 
 function buildDistortionCurve(amount) {
@@ -996,6 +1051,12 @@ if (resetAllFxBtn) {
 
 syncFxFromUi();
 
+if (logEl) {
+  logEl.addEventListener("scroll", () => {
+    logAutoFollow = isLogNearBottom();
+  });
+}
+
 prepareBtn.addEventListener("click", () => prepareAndPlay({ reset: false }));
 resetBtn.addEventListener("click", () => prepareAndPlay({ reset: true }));
 
@@ -1247,6 +1308,15 @@ window.addEventListener("beforeunload", () => {
   if (flameRaf) {
     window.cancelAnimationFrame(flameRaf);
     flameRaf = 0;
+  }
+
+  if (logFlushRaf) {
+    window.cancelAnimationFrame(logFlushRaf);
+    logFlushRaf = 0;
+  }
+
+  if (logLineBuffer.length > 0) {
+    flushLogBuffer();
   }
 
   try {

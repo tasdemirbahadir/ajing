@@ -31,8 +31,8 @@ const CONFIG = {
   tempoMatchPoolSize: parseInteger(process.env.TEMPO_MATCH_POOL_SIZE, 5),
   strictBpmMatch: parseBoolean(process.env.STRICT_BPM_MATCH, true),
   maxTempoShiftPercent: parseNumber(process.env.MAX_TEMPO_SHIFT_PERCENT, 8),
-  minTransitionSeconds: parseNumber(process.env.MIN_TRANSITION_SECONDS, 5),
-  maxTransitionSeconds: parseNumber(process.env.MAX_TRANSITION_SECONDS, 10),
+  minTransitionSeconds: parseNumber(process.env.MIN_TRANSITION_SECONDS, 8),
+  maxTransitionSeconds: parseNumber(process.env.MAX_TRANSITION_SECONDS, 16),
   playAudio: parseBoolean(process.env.PLAY_AUDIO, true),
   markPlayedWhenNotPlaying: parseBoolean(process.env.MARK_PLAYED_WHEN_NOT_PLAYING, true),
   cleanTempAfterRun: parseBoolean(process.env.CLEAN_TEMP_AFTER_RUN, false),
@@ -43,7 +43,7 @@ const CONFIG = {
 const TRANSITIONS = [
   {
     name: "Velvet Fade",
-    baseSeconds: 7,
+    baseSeconds: 12,
     c1: "qsin",
     c2: "qsin",
     outFx: "lowpass=f=10000",
@@ -51,7 +51,7 @@ const TRANSITIONS = [
   },
   {
     name: "Club Lift",
-    baseSeconds: 8,
+    baseSeconds: 14,
     c1: "exp",
     c2: "hsin",
     outFx: "highpass=f=180,bass=g=-3:f=120",
@@ -59,7 +59,7 @@ const TRANSITIONS = [
   },
   {
     name: "Air Sweep",
-    baseSeconds: 6,
+    baseSeconds: 10,
     c1: "hsin",
     c2: "esin",
     outFx: "treble=g=-4:f=6500",
@@ -67,7 +67,7 @@ const TRANSITIONS = [
   },
   {
     name: "Echo Mist",
-    baseSeconds: 9,
+    baseSeconds: 14,
     c1: "tri",
     c2: "exp",
     outFx: "aecho=0.7:0.75:45:0.2",
@@ -75,7 +75,7 @@ const TRANSITIONS = [
   },
   {
     name: "Radio Tunnel",
-    baseSeconds: 7,
+    baseSeconds: 12,
     c1: "log",
     c2: "qsin",
     outFx: "lowpass=f=3200,highpass=f=220",
@@ -83,7 +83,7 @@ const TRANSITIONS = [
   },
   {
     name: "Warm Bloom",
-    baseSeconds: 8,
+    baseSeconds: 14,
     c1: "par",
     c2: "cub",
     outFx: "bass=g=4:f=115,treble=g=-2:f=7000",
@@ -91,7 +91,7 @@ const TRANSITIONS = [
   },
   {
     name: "Tight Pump",
-    baseSeconds: 6,
+    baseSeconds: 10,
     c1: "exp",
     c2: "exp",
     outFx: "acompressor=threshold=-20dB:ratio=3:attack=10:release=140",
@@ -99,7 +99,7 @@ const TRANSITIONS = [
   },
   {
     name: "Crystal Blend",
-    baseSeconds: 7,
+    baseSeconds: 12,
     c1: "qua",
     c2: "qua",
     outFx: "treble=g=3:f=7800",
@@ -107,7 +107,7 @@ const TRANSITIONS = [
   },
   {
     name: "Bass Relay",
-    baseSeconds: 8,
+    baseSeconds: 14,
     c1: "cbr",
     c2: "qsin",
     outFx: "highpass=f=200",
@@ -115,7 +115,7 @@ const TRANSITIONS = [
   },
   {
     name: "Sunset Drift",
-    baseSeconds: 10,
+    baseSeconds: 16,
     c1: "tri",
     c2: "hsin",
     outFx: "aecho=0.55:0.7:60:0.2,lowpass=f=7200",
@@ -123,7 +123,7 @@ const TRANSITIONS = [
   },
   {
     name: "Clean Arc",
-    baseSeconds: 5,
+    baseSeconds: 10,
     c1: "squ",
     c2: "cub",
     outFx: "volume=0.98",
@@ -131,7 +131,7 @@ const TRANSITIONS = [
   },
   {
     name: "Neon Glide",
-    baseSeconds: 9,
+    baseSeconds: 14,
     c1: "ipar",
     c2: "exp",
     outFx: "lowpass=f=8500,treble=g=-2:f=7000",
@@ -218,9 +218,13 @@ async function main() {
         track.durationSec = await probeDurationSec(track.filePath);
       }
 
-      trackSpinner.text = `${prefix} ${track.title} -> estimating BPM`;
-      if (!isPositiveNumber(track.bpm)) {
-        track.bpm = await estimateBpm(track.filePath, track.durationSec);
+      trackSpinner.text = `${prefix} ${track.title} -> detecting beats and BPM`;
+      if (!isPositiveNumber(track.bpm) || !isPositiveNumber(track.firstBeatSec) || track.bpmMethod !== 'regression-v3') {
+        const beats = await estimateBeats(track.filePath, track.durationSec);
+        track.bpm = beats.bpm;
+        track.firstBeatSec = beats.firstBeatSec;
+        track.beatsSec = beats.beatsSec;
+        track.bpmMethod = 'regression-v3';
       }
 
       track.unavailable = false;
@@ -257,9 +261,9 @@ async function main() {
   console.log("Building tempo-aware random playback order...");
   const order = buildTempoAwareOrder(preparedTracks, CONFIG.tempoMatchPoolSize);
   const plan = buildTempoPlan(order);
-  console.log("Tempo mode: strict beatmatch (each next track is matched to previous track BPM exactly)");
+  console.log("Tempo mode: octave-aware beatmatch with beat-grid alignment");
 
-  console.log("\nRendering tempo-adjusted stems...");
+  console.log("\nRendering tempo-adjusted stems and re-detecting beats...");
   for (let i = 0; i < plan.length; i += 1) {
     const item = plan[i];
     const prefix = `[${i + 1}/${plan.length}]`;
@@ -269,8 +273,18 @@ async function main() {
       await renderTempoAdjustedStem(item.track.filePath, item.adjustedPath, item.tempoFactor);
       stemSpinner.text = `${prefix} ${item.track.title} -> measuring adjusted duration`;
       item.adjustedDurationSec = await probeDurationSec(item.adjustedPath);
+
+      // Re-detect beats on the adjusted stem for sub-sample-accurate alignment.
+      // The atempo filter can introduce micro-shifts so analysing the actual
+      // time-stretched audio gives us the true beat grid of the rendered file.
+      stemSpinner.text = `${prefix} ${item.track.title} -> re-detecting beats on adjusted stem`;
+      const stemBeats = await estimateBeats(item.adjustedPath, item.adjustedDurationSec);
+      item.stemBpm = stemBeats.bpm;
+      item.stemFirstBeatSec = stemBeats.firstBeatSec;
+      item.stemBeatsSec = stemBeats.beatsSec;
+
       stemSpinner.succeed(
-        `${prefix} stem ready: ${item.track.title} (${Math.round(item.adjustedDurationSec)}s, ${item.adjustedBpm.toFixed(1)} BPM)`
+        `${prefix} stem ready: ${item.track.title} (${Math.round(item.adjustedDurationSec)}s, ${item.stemBpm.toFixed(1)} BPM, ${item.stemBeatsSec.length} beats)`
       );
     } catch (err) {
       stemSpinner.fail(`${prefix} stem failed: ${item.track.title}`);
@@ -285,37 +299,68 @@ async function main() {
   let mixPath = plan[0].adjustedPath;
   let mixDuration = plan[0].adjustedDurationSec;
 
+  // Beat grid for the entire mix is anchored by the first track's *stem* beats.
+  // Use the re-detected BPM from the actual rendered stem for highest accuracy.
+  const mixBpm = plan[0].stemBpm || plan[0].adjustedBpm;
+  const beatPeriod = isPositiveNumber(mixBpm) ? 60 / mixBpm : 0;
+  const mixGridOffset = plan[0].stemFirstBeatSec || plan[0].firstBeatSec;
+
   for (let i = 1; i < plan.length; i += 1) {
     const incoming = plan[i];
     const transition = pickRandomTransition();
     const applied = applyTransitionSettings(transition, mixDuration, incoming.adjustedDurationSec);
+
+    // Quantize transition duration to an exact number of beat periods
+    // so both tracks' beat grids stay aligned throughout the crossfade.
+    if (beatPeriod > 0.15) {
+      const beatCount = Math.max(4, Math.round(applied.durationSec / beatPeriod));
+      let quantized = beatCount * beatPeriod;
+      const maxTd = Math.min(mixDuration * 0.35, incoming.adjustedDurationSec * 0.35);
+      if (quantized > maxTd) {
+        quantized = Math.max(4, Math.floor(maxTd / beatPeriod)) * beatPeriod;
+      }
+      applied.durationSec = Number(quantized.toFixed(3));
+    }
+
     const transitionSpinner = startSpinner(
       `Transition ${i}/${plan.length - 1} -> ${applied.name} (${applied.durationSec.toFixed(2)}s) into ${incoming.track.title}`
     );
 
+    // Use re-detected stem beats for alignment (actual audio, not theoretical).
+    const incomingFirstBeat = incoming.stemFirstBeatSec || 0;
+    const incomingBeats = incoming.stemBeatsSec || [];
+
+    const beatAlignment = beatPeriod > 0.15
+      ? { beatPeriod, mixGridOffset, incomingFirstBeatSec: incomingFirstBeat, incomingBeats }
+      : null;
+
     const outPath = path.join(workDir, "mix", `mix-${String(i).padStart(3, "0")}.wav`);
+    let beatShiftSec = 0;
     try {
-      await renderTransitionMix({
+      const result = await renderTransitionMix({
         prevMixPath: mixPath,
         nextPath: incoming.adjustedPath,
         outputPath: outPath,
         prevDurationSec: mixDuration,
         nextDurationSec: incoming.adjustedDurationSec,
         transition: applied,
+        beatAlignment,
       });
+      beatShiftSec = result.beatShiftSec || 0;
     } catch (err) {
       transitionSpinner.fail(`Transition ${i}/${plan.length - 1} failed: ${incoming.track.title}`);
       throw err;
     }
 
     transitionPlan.push(applied);
-    startTimesSec[i] = startTimesSec[i - 1] + plan[i - 1].adjustedDurationSec - applied.durationSec;
+    startTimesSec[i] = startTimesSec[i - 1] + plan[i - 1].adjustedDurationSec - applied.durationSec + beatShiftSec;
 
     mixPath = outPath;
-    mixDuration = mixDuration + incoming.adjustedDurationSec - applied.durationSec;
+    mixDuration = mixDuration + incoming.adjustedDurationSec - applied.durationSec + beatShiftSec;
 
+    const shiftLabel = Math.abs(beatShiftSec) > 0.001 ? ` [beat-shift ${beatShiftSec > 0 ? "+" : ""}${(beatShiftSec * 1000).toFixed(0)}ms]` : "";
     transitionSpinner.succeed(
-      `Transition ${i}/${plan.length - 1}: ${applied.name} (${applied.durationSec.toFixed(2)}s) -> ${incoming.track.title}`
+      `Transition ${i}/${plan.length - 1}: ${applied.name} (${applied.durationSec.toFixed(2)}s)${shiftLabel} -> ${incoming.track.title}`
     );
   }
 
@@ -680,6 +725,7 @@ function buildSessionSummary(plan, startTimesSec, totalDurationSec) {
       originalBpm: Number(item.originalBpm.toFixed(3)),
       adjustedBpm: Number(item.adjustedBpm.toFixed(3)),
       tempoFactor: Number(item.tempoFactor.toFixed(6)),
+      firstBeatSec: Number((item.firstBeatSec || 0).toFixed(3)),
     };
   });
 
@@ -809,10 +855,14 @@ async function probeDurationSec(filePath) {
   return value;
 }
 
-async function estimateBpm(filePath, durationSec) {
-  const sampleSeconds = Math.max(15, Math.min(CONFIG.bpmSampleSeconds, Math.floor(durationSec || CONFIG.bpmSampleSeconds)));
+async function estimateBeats(filePath, durationSec) {
+  // Analyze a large portion of the song (up to 120s from the center) for
+  // maximum beat data.  More beats → more accurate linear-regression BPM.
+  const maxSample = Math.max(CONFIG.bpmSampleSeconds, 120);
+  const sampleSeconds = Math.max(15, Math.min(maxSample, Math.floor(durationSec || maxSample)));
   const startSec = Math.max(0, Math.floor(((durationSec || sampleSeconds) - sampleSeconds) / 2));
 
+  // Extract at 44100 Hz — MusicTempo's default hopSize (441) assumes this rate.
   const argsList = [
     "-hide_banner",
     "-loglevel",
@@ -830,7 +880,7 @@ async function estimateBpm(filePath, durationSec) {
     "-ac",
     "1",
     "-ar",
-    "22050",
+    "44100",
     "-f",
     "f32le",
     "-",
@@ -840,34 +890,176 @@ async function estimateBpm(filePath, durationSec) {
   try {
     raw = await runCommandCapture(CONFIG.ffmpegBin, argsList, { captureBinary: true });
   } catch (err) {
-    console.warn(`BPM extraction failed, using fallback for: ${path.basename(filePath)}`);
-    return 120;
+    console.warn(`Beat extraction failed, using fallback for: ${path.basename(filePath)}`);
+    return { bpm: 120, firstBeatSec: 0, beatsSec: [] };
   }
 
   const sampleCount = Math.floor(raw.length / 4);
-  if (sampleCount < 22050 * 5) {
-    return 120;
+  if (sampleCount < 44100 * 3) {
+    return { bpm: 120, firstBeatSec: 0, beatsSec: [] };
   }
 
-  const step = 2;
-  const samples = new Array(Math.floor(sampleCount / step));
-  let outIndex = 0;
-  for (let i = 0; i < sampleCount; i += step) {
-    samples[outIndex] = raw.readFloatLE(i * 4);
-    outIndex += 1;
+  // Pass 44100 Hz audio directly to MusicTempo — no downsampling.
+  const samples = new Array(sampleCount);
+  for (let i = 0; i < sampleCount; i += 1) {
+    samples[i] = raw.readFloatLE(i * 4);
   }
 
   try {
-    const mt = new MusicTempo(samples);
+    // Tune MusicTempo for electronic/pop music ranges and longer analysis.
+    const mt = new MusicTempo(samples, {
+      minBeatInterval: 60 / 220,  // max 220 BPM
+      maxBeatInterval: 60 / 50,   // min 50 BPM
+      expiryTime: 16,             // tolerate longer silent passages
+    });
     if (!isPositiveNumber(mt.tempo)) {
-      return 120;
+      return { bpm: 120, firstBeatSec: 0, beatsSec: [] };
     }
 
-    const bpm = clamp(mt.tempo, 70, 190);
-    return bpm;
+    // mt.beats is an array of beat times in seconds relative to the extracted sample.
+    const rawBeats = Array.isArray(mt.beats) ? mt.beats : [];
+
+    // Filter out obviously bad intervals (skipped beats, double-triggers).
+    const cleanBeats = filterBeatOutliers(rawBeats);
+
+    // Use linear regression on beat positions for the most statistically
+    // accurate BPM and phase.  Each beat at index k should satisfy:
+    //   beatTime[k] ≈ phase + k * period
+    // Regression gives period (→ BPM) and phase (→ first beat modulo period).
+    const regression = regressBeatGrid(cleanBeats);
+
+    let bpm;
+    let gridPhaseSec; // phase within the sample window
+    if (regression) {
+      bpm = clamp(60 / regression.period, 50, 220);
+      gridPhaseSec = regression.phase;
+    } else if (cleanBeats.length >= 4) {
+      // Fallback: median inter-beat interval
+      const intervals = [];
+      for (let j = 1; j < cleanBeats.length; j++) {
+        intervals.push(cleanBeats[j] - cleanBeats[j - 1]);
+      }
+      intervals.sort((a, b) => a - b);
+      const medianInterval = intervals[Math.floor(intervals.length / 2)];
+      bpm = clamp(60 / medianInterval, 50, 220);
+      gridPhaseSec = cleanBeats[0];
+    } else {
+      bpm = clamp(Number(mt.tempo), 50, 220);
+      gridPhaseSec = rawBeats.length > 0 ? Number(rawBeats[0]) : 0;
+    }
+
+    // Convert beat times to absolute track time.
+    const beatsSec = cleanBeats.map((b) => Math.max(0, startSec + b));
+    const firstBeatSec = Math.max(0, startSec + gridPhaseSec);
+
+    return { bpm, firstBeatSec, beatsSec };
   } catch (err) {
-    return 120;
+    return { bpm: 120, firstBeatSec: 0, beatsSec: [] };
   }
+}
+
+/**
+ * Remove beat outliers: discard beats whose interval to the previous beat
+ * is more than 1.8× or less than 0.55× the median interval.  This removes
+ * double-triggers and missed-beat gaps that would skew regression.
+ */
+function filterBeatOutliers(beats) {
+  if (beats.length < 4) return beats.slice();
+
+  const intervals = [];
+  for (let i = 1; i < beats.length; i++) {
+    intervals.push(beats[i] - beats[i - 1]);
+  }
+  const sorted = intervals.slice().sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  if (!median || median <= 0) return beats.slice();
+
+  const lo = median * 0.55;
+  const hi = median * 1.8;
+
+  const clean = [beats[0]];
+  for (let i = 1; i < beats.length; i++) {
+    const gap = beats[i] - beats[i - 1];
+    if (gap >= lo && gap <= hi) {
+      clean.push(beats[i]);
+    }
+  }
+  return clean;
+}
+
+/**
+ * Least-squares linear regression on beat positions to derive the best-fit
+ * period (inter-beat interval) and phase (time of "beat 0").
+ *
+ * Model: beatTime[i] = phase + i * period
+ *
+ * Returns { period, phase } or null if insufficient data.
+ */
+function regressBeatGrid(beats) {
+  const n = beats.length;
+  if (n < 6) return null;
+
+  // x = beat index, y = beat time
+  let sumX = 0;
+  let sumY = 0;
+  let sumXX = 0;
+  let sumXY = 0;
+  for (let i = 0; i < n; i++) {
+    sumX += i;
+    sumY += beats[i];
+    sumXX += i * i;
+    sumXY += i * beats[i];
+  }
+
+  const denom = n * sumXX - sumX * sumX;
+  if (Math.abs(denom) < 1e-12) return null;
+
+  const period = (n * sumXY - sumX * sumY) / denom;
+  const phase = (sumY - period * sumX) / n;
+
+  if (!Number.isFinite(period) || period < 0.15 || period > 2.0) return null;
+  if (!Number.isFinite(phase)) return null;
+
+  // Compute residual to verify fit quality (reject if beats are too noisy).
+  let ssRes = 0;
+  for (let i = 0; i < n; i++) {
+    const predicted = phase + i * period;
+    const diff = beats[i] - predicted;
+    ssRes += diff * diff;
+  }
+  const rmse = Math.sqrt(ssRes / n);
+
+  // If RMSE > 15% of beat period the grid is too unreliable.
+  if (rmse > period * 0.15) return null;
+
+  // Normalize phase into [0, period)
+  const normPhase = ((phase % period) + period) % period;
+  return { period, phase: normPhase };
+}
+
+/**
+ * Given a target BPM, find the octave of trackBpm (original, doubled, or halved)
+ * that is closest to the target. This prevents extreme tempo shifts when songs
+ * are at harmonically related tempos (e.g. 70 vs 140 BPM).
+ */
+function closestOctaveBpm(targetBpm, trackBpm) {
+  if (!isPositiveNumber(targetBpm) || !isPositiveNumber(trackBpm)) {
+    return trackBpm || 120;
+  }
+
+  const candidates = [trackBpm, trackBpm * 2, trackBpm / 2];
+  let best = trackBpm;
+  let bestDiff = Math.abs(targetBpm - trackBpm);
+
+  for (const c of candidates) {
+    const diff = Math.abs(targetBpm - c);
+    if (diff < bestDiff) {
+      best = c;
+      bestDiff = diff;
+    }
+  }
+
+  return best;
 }
 
 function buildTempoAwareOrder(unplayedTracks, poolSize) {
@@ -884,7 +1076,10 @@ function buildTempoAwareOrder(unplayedTracks, poolSize) {
     const scored = remaining
       .map((track) => {
         const bpm = isPositiveNumber(track.bpm) ? track.bpm : 120;
-        const diff = Math.abs(bpm - currentBpm);
+        // Use octave-aware distance so 70 BPM and 140 BPM songs are
+        // treated as close neighbours rather than far apart.
+        const closestBpm = closestOctaveBpm(currentBpm, bpm);
+        const diff = Math.abs(closestBpm - currentBpm);
         return { track, diff };
       })
       .sort((a, b) => a.diff - b.diff);
@@ -908,6 +1103,7 @@ function buildTempoPlan(order) {
   for (let i = 0; i < order.length; i += 1) {
     const track = order[i];
     const originalBpm = isPositiveNumber(track.bpm) ? track.bpm : 120;
+    const firstBeatSec = isPositiveNumber(track.firstBeatSec) ? track.firstBeatSec : 0;
 
     if (i === 0) {
       plan.push({
@@ -915,20 +1111,25 @@ function buildTempoPlan(order) {
         originalBpm,
         adjustedBpm: originalBpm,
         tempoFactor: 1,
+        firstBeatSec,
       });
       continue;
     }
 
     const prev = plan[i - 1];
     const desired = prev.adjustedBpm;
-    const rawFactor = desired / originalBpm;
-    const tempoFactor = rawFactor;
+    // Use octave-corrected BPM so a 70 BPM track targeting 140 BPM
+    // is treated as already harmonically matched (factor ≈ 1.0),
+    // rather than being doubled in speed.
+    const effectiveBpm = closestOctaveBpm(desired, originalBpm);
+    const tempoFactor = desired / effectiveBpm;
 
     plan.push({
       track,
       originalBpm,
-      adjustedBpm: originalBpm * tempoFactor,
+      adjustedBpm: effectiveBpm * tempoFactor,
       tempoFactor,
+      firstBeatSec,
     });
   }
 
@@ -937,7 +1138,9 @@ function buildTempoPlan(order) {
 
 async function renderTempoAdjustedStem(inputPath, outputPath, tempoFactor) {
   const tempoFilter = buildAtempoFilter(tempoFactor);
-  const filter = `${tempoFilter},aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo`;
+  // Loudnorm normalizes all stems to the same perceived loudness (-14 LUFS)
+  // so volume differences between tracks don't cause jarring jumps.
+  const filter = `${tempoFilter},aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,loudnorm=I=-14:TP=-1.5:LRA=11`;
 
   const argsList = [
     "-y",
@@ -1003,23 +1206,143 @@ function applyTransitionSettings(transition, prevDurationSec, nextDurationSec) {
   };
 }
 
-async function renderTransitionMix({ prevMixPath, nextPath, outputPath, prevDurationSec, nextDurationSec, transition }) {
-  const td = transition.durationSec;
+async function renderTransitionMix({ prevMixPath, nextPath, outputPath, prevDurationSec, nextDurationSec, transition, beatAlignment }) {
+  let td = transition.durationSec;
 
   if (!isPositiveNumber(td) || td <= 0.5 || prevDurationSec <= td || nextDurationSec <= td) {
     await renderConcatMix(prevMixPath, nextPath, outputPath);
     transition.durationSec = 0;
     transition.name = `${transition.name} (fallback concat)`;
-    return;
+    return { beatShiftSec: 0 };
   }
 
-  const prevFadeStart = Math.max(0, prevDurationSec - td);
-  const delayMs = Math.max(0, Math.round(prevFadeStart * 1000));
+  let beatShiftSec = 0;
+  let prevFadeStart = Math.max(0, prevDurationSec - td);
+
+  if (beatAlignment && isPositiveNumber(beatAlignment.beatPeriod) && beatAlignment.beatPeriod > 0.15) {
+    const bp = beatAlignment.beatPeriod;
+    const gridOffset = beatAlignment.mixGridOffset;
+    const inFirstBeat = beatAlignment.incomingFirstBeatSec;
+    const inBeats = beatAlignment.incomingBeats || [];
+
+    // Snap the fade-out start to the nearest beat on the mix grid
+    // so the crossfade begins cleanly on a beat boundary.
+    const phaseAtFade = ((prevFadeStart - gridOffset) % bp + bp) % bp;
+    if (phaseAtFade <= bp / 2) {
+      prevFadeStart -= phaseAtFade;
+    } else {
+      prevFadeStart += (bp - phaseAtFade);
+    }
+    prevFadeStart = Math.max(0, prevFadeStart);
+    td = Math.max(bp * 2, prevDurationSec - prevFadeStart);
+    transition.durationSec = Number(td.toFixed(3));
+
+    // --- High-precision beat alignment ---
+    // Focus on beats within the transition overlap zone for best accuracy.
+    // Weight early beats (most audible during crossfade) more heavily.
+    // Test 401 candidate shifts for ~0.25% beat-period resolution.
+
+    let bestShift = 0;
+
+    if (inBeats.length >= 4) {
+      // Only consider beats that fall within the transition window (+ margin).
+      // Beats far from the overlap zone add noise to the alignment score.
+      const transBeats = inBeats.filter(b => b >= 0 && b <= td * 1.5);
+      const useBeats = transBeats.length >= 4 ? transBeats : inBeats;
+
+      const steps = 401;
+      const halfBp = bp / 2;
+      let bestScore = Infinity;
+
+      for (let s = 0; s < steps; s++) {
+        const candidate = -halfBp + (s / (steps - 1)) * bp;
+        let score = 0;
+        let weightSum = 0;
+        for (let b = 0; b < useBeats.length; b++) {
+          const mixTime = prevFadeStart + candidate + useBeats[b];
+          const phase = ((mixTime - gridOffset) % bp + bp) % bp;
+          const err = phase <= halfBp ? phase : phase - bp;
+          // Beats closer to the start of the transition are more audible
+          // during the crossfade, so weight them higher.
+          const progress = Math.min(useBeats[b] / Math.max(td, 1), 2);
+          const weight = Math.max(0.1, 1 - progress * 0.4);
+          score += err * err * weight;
+          weightSum += weight;
+        }
+        if (weightSum > 0) {
+          score /= weightSum;
+          if (score < bestScore) {
+            bestScore = score;
+            bestShift = candidate;
+          }
+        }
+      }
+    } else {
+      // Single-point alignment fallback.
+      const raw = gridOffset - prevFadeStart - inFirstBeat;
+      let shift = ((raw % bp) + bp) % bp;
+      if (shift > bp / 2) shift -= bp;
+      bestShift = shift;
+    }
+
+    beatShiftSec = bestShift;
+  }
+
+  const adjustedDelaySec = prevFadeStart + beatShiftSec;
+  const delayMs = Math.max(0, Math.round(adjustedDelaySec * 1000));
+
+  // === DJ-style EQ-swap transition ===
+  //
+  // NEVER fades overall volume — always full-power audio playing.
+  // Uses frequency-band crossfade: bass swaps first, then highs follow.
+  //
+  // Key design:
+  //   - Pre-transition audio: BIT-PERFECT (time-split, zero filters)
+  //   - Post-transition audio: BIT-PERFECT (time-split, zero filters)
+  //   - Transition zone ONLY: band-split with LR4 crossover, per-band fades
+  //   - No cumulative degradation on the accumulated mix
+  //
+  // Timeline within the transition zone:
+  //   0%────[bass swaps]────60%
+  //              40%────[highs swap]────100%
+  //
+  // At every point: outgoing_band_level + incoming_band_level = 1.0
+  // per band, so total perceived loudness is constant. No silence ever.
+
+  const bassFreq = 220;
+  // Linkwitz-Riley 4th-order = two cascaded Butterworth (flat magnitude reconstruction)
+  const lr4Lo = `lowpass=f=${bassFreq},lowpass=f=${bassFreq}`;
+  const lr4Hi = `highpass=f=${bassFreq},highpass=f=${bassFreq}`;
+
+  const prevFadeStartMs = Math.round(prevFadeStart * 1000);
+  const postTransMs = Math.max(0, Math.round((adjustedDelaySec + td) * 1000));
+
+  // Stagger: bass crossfades in first 60%, highs in last 60% (20% overlap)
+  const bassDur = td * 0.6;
+  const highStart = td * 0.4;
+  const highDur = td * 0.6;
 
   const graph = [
-    `[0:a]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=stereo,atrim=0:${fmt(prevDurationSec)},asetpts=PTS-STARTPTS,afade=t=out:st=${fmt(prevFadeStart)}:d=${fmt(td)}[a0]`,
-    `[1:a]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=stereo,atrim=0:${fmt(nextDurationSec)},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=${fmt(td)},adelay=${delayMs}|${delayMs}[a1]`,
-    `[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.98[outa]`,
+    // === OUTGOING: time-split into pre-transition (clean) + transition zone ===
+    `[0:a]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=stereo,atrim=0:${fmt(prevDurationSec)},asetpts=PTS-STARTPTS,asplit=3[a0c1][a0c2][a0c3]`,
+    // Pre-transition: zero processing, carries all accumulated mix audio untouched
+    `[a0c1]atrim=0:${fmt(prevFadeStart)},asetpts=PTS-STARTPTS[a0pre]`,
+    // Transition zone bass: LR4 lowpass, fades out over first 60%
+    `[a0c2]atrim=${fmt(prevFadeStart)}:${fmt(prevDurationSec)},asetpts=PTS-STARTPTS,${lr4Lo},afade=t=out:st=0:d=${fmt(bassDur)}:curve=tri,adelay=${prevFadeStartMs}|${prevFadeStartMs}[a0t_lo]`,
+    // Transition zone highs: LR4 highpass, stays full then fades out in last 60%
+    `[a0c3]atrim=${fmt(prevFadeStart)}:${fmt(prevDurationSec)},asetpts=PTS-STARTPTS,${lr4Hi},afade=t=out:st=${fmt(highStart)}:d=${fmt(highDur)}:curve=tri,adelay=${prevFadeStartMs}|${prevFadeStartMs}[a0t_hi]`,
+
+    // === INCOMING: time-split into transition zone + post-transition (clean) ===
+    `[1:a]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=stereo,atrim=0:${fmt(nextDurationSec)},asetpts=PTS-STARTPTS,asplit=3[a1c1][a1c2][a1c3]`,
+    // Transition zone bass: LR4 lowpass, fades in over first 60%
+    `[a1c1]atrim=0:${fmt(td)},asetpts=PTS-STARTPTS,${lr4Lo},afade=t=in:st=0:d=${fmt(bassDur)}:curve=tri,adelay=${delayMs}|${delayMs}[a1t_lo]`,
+    // Transition zone highs: LR4 highpass, silent then fades in over last 60%
+    `[a1c2]atrim=0:${fmt(td)},asetpts=PTS-STARTPTS,${lr4Hi},afade=t=in:st=${fmt(highStart)}:d=${fmt(highDur)}:curve=tri,adelay=${delayMs}|${delayMs}[a1t_hi]`,
+    // Post-transition: zero processing, incoming track continues untouched
+    `[a1c3]atrim=${fmt(td)}:${fmt(nextDurationSec)},asetpts=PTS-STARTPTS,adelay=${postTransMs}|${postTransMs}[a1post]`,
+
+    // === MIX all 6 streams — no normalization, no limiter ===
+    `[a0pre][a0t_lo][a0t_hi][a1t_lo][a1t_hi][a1post]amix=inputs=6:duration=longest:dropout_transition=0:normalize=0[outa]`,
   ].join(";");
 
   const argsList = [
@@ -1039,6 +1362,7 @@ async function renderTransitionMix({ prevMixPath, nextPath, outputPath, prevDura
   ];
 
   await runCommandCapture(CONFIG.ffmpegBin, argsList, { captureBinary: false });
+  return { beatShiftSec };
 }
 
 async function renderConcatMix(prevMixPath, nextPath, outputPath) {
