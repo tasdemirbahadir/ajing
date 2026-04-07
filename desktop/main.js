@@ -39,11 +39,11 @@ const DESKTOP_SETTING_DEFINITIONS = [
   { key: "GOOGLE_CLIENT_ID", type: "string", defaultValue: "" },
   { key: "GOOGLE_CLIENT_SECRET", type: "string", defaultValue: "" },
   { key: "GOOGLE_REFRESH_TOKEN", type: "string", defaultValue: "" },
-  { key: "BPM_SAMPLE_SECONDS", type: "int", defaultValue: 35, min: 10, max: 240 },
-  { key: "TEMPO_MATCH_POOL_SIZE", type: "int", defaultValue: 5, min: 1, max: 30 },
-  { key: "MAX_TEMPO_SHIFT_PERCENT", type: "number", defaultValue: 8, min: 0, max: 50 },
-  { key: "MIN_TRANSITION_SECONDS", type: "number", defaultValue: 20, min: 1, max: 180 },
-  { key: "MAX_TRANSITION_SECONDS", type: "number", defaultValue: 30, min: 1, max: 180 },
+  { key: "BPM_SAMPLE_SECONDS", type: "int", defaultValue: 300, min: 10, max: 300 },
+  { key: "TEMPO_MATCH_POOL_SIZE", type: "int", defaultValue: 1, min: 1, max: 30 },
+  { key: "MAX_TEMPO_SHIFT_PERCENT", type: "number", defaultValue: 12, min: 0, max: 100 },
+  { key: "MIN_TRANSITION_SECONDS", type: "number", defaultValue: 40, min: 1, max: 180 },
+  { key: "MAX_TRANSITION_SECONDS", type: "number", defaultValue: 88, min: 1, max: 180 },
   { key: "PLAY_AUDIO", type: "bool", defaultValue: true },
   { key: "CLEAN_TEMP_AFTER_RUN", type: "bool", defaultValue: false },
   { key: "AUTO_RESET_ON_START", type: "bool", defaultValue: false },
@@ -852,6 +852,12 @@ function runDjPreparation({ reset }) {
   }
 
   const childConfig = buildChildEnv();
+
+  try {
+    fs.rmSync(path.dirname(childConfig.runtime.outputFile), { recursive: true, force: true });
+  } catch {
+    // Best-effort cache cleanup only.
+  }
 
   const hasPlaylistSource =
     String(childConfig.env.PLAYLIST_URL || "").trim().length > 0 ||

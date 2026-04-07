@@ -9,6 +9,7 @@
     "desktop/**/*",
     "src/**/*",
     "scripts/**/*",
+    "node_modules/**/*",
     "package.json",
     ".env.example",
     "README.md"

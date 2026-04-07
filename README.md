@@ -27,8 +27,9 @@ Node.js AI DJ engine for YouTube/YouTube Music playlists with:
 
 - Private playlist support (OAuth refresh token or yt-dlp cookies)
 - Random unplayed selection with BPM-aware ordering
-- Strict beatmatch mode (default): next track BPM is matched to previous track BPM
-- Random transition presets
+- **Beat-accurate tempo matching** — every track is stretched to the same BPM using `atempo`, then re-analysed to get the exact beat grid of the rendered stem
+- **Professional EQ-swap transitions** — bass band swaps first (0–60%), high band swaps second (40–100%), 20% overlap. No volume fades — constant perceived loudness at all times. Equal-power `esin`/`isin` curves. True 4th-order Linkwitz-Riley crossover at 250 Hz
+- **Sub-beat alignment** — 401 candidate offsets tested per transition, weighted toward early transition beats
 - Detailed progress output with spinner-friendly logs
 - Persistent played/unplayed/unavailable state
 - Automatic skip of unavailable videos
@@ -182,12 +183,10 @@ If desktop build shows missing `PLAYLIST_URL`/`GOOGLE_PLAYLIST_ID`, place `.env`
 | `STATE_FILE` | `.cache/dj-state.json` | Persistent played/unplayed/unavailable state. |
 | `OUTPUT_FILE` | `.cache/output/ai-dj-mix.wav` | Rendered mix output audio file. |
 | `DJ_SESSION_FILE` | `.cache/output/ai-dj-session.json` | Session timeline metadata for desktop controls. |
-| `BPM_SAMPLE_SECONDS` | `35` | Seconds sampled for BPM estimation. |
-| `TEMPO_MATCH_POOL_SIZE` | `5` | Candidate pool for random next-track selection by BPM closeness. |
-| `STRICT_BPM_MATCH` | `true` | If true, next track BPM is matched exactly to current track BPM. |
-| `MAX_TEMPO_SHIFT_PERCENT` | `8` | Used only when strict beatmatch is false. |
-| `MIN_TRANSITION_SECONDS` | `5` | Minimum transition duration. |
-| `MAX_TRANSITION_SECONDS` | `10` | Maximum transition duration. |
+| `BPM_SAMPLE_SECONDS` | `90` | Seconds sampled for BPM estimation (more = higher accuracy). |
+| `TEMPO_MATCH_POOL_SIZE` | `5` | Candidate pool for next-track selection by BPM closeness. |
+| `MIN_TRANSITION_SECONDS` | `16` | Minimum transition duration. |
+| `MAX_TRANSITION_SECONDS` | `32` | Maximum transition duration. |
 | `PLAY_AUDIO` | `true` | If false, render only (no immediate ffplay playback). |
 | `MARK_PLAYED_WHEN_NOT_PLAYING` | `true` | If `PLAY_AUDIO=false`, mark planned tracks as played after render. |
 | `CLEAN_TEMP_AFTER_RUN` | `false` | Cleanup intermediate render files after run. |
