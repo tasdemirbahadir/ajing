@@ -21,26 +21,17 @@ const fxEchoValueEl = document.getElementById("fxEchoValue");
 const logEl = document.getElementById("logOutput");
 const flameCanvas = document.getElementById("flamegraphCanvas");
 const flameCtx = flameCanvas ? flameCanvas.getContext("2d") : null;
-const visualStagePanel = document.getElementById("visualStagePanel");
-const visualStageCanvas = document.getElementById("visualStageCanvas");
-const visualStageCtx = visualStageCanvas ? visualStageCanvas.getContext("2d") : null;
-const visualStageStatusEl = document.getElementById("visualStageStatus");
-const visualStageHintEl = document.getElementById("visualStageHint");
 
 const prepareBtn = document.getElementById("prepareBtn");
 const pauseBtn = document.getElementById("pauseBtn");
 const prevBtn = document.getElementById("prevBtn");
 const nextBtn = document.getElementById("nextBtn");
-const visualModeBtn = document.getElementById("visualModeBtn");
 const exportBtn = document.getElementById("exportBtn");
 const resetBtn = document.getElementById("resetBtn");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const resetSettingsBtn = document.getElementById("resetSettingsBtn");
 const settingsStatusEl = document.getElementById("settingsStatus");
 const resetAllFxBtn = document.getElementById("resetAllFxBtn");
-const visualStageFullscreenBtn = document.getElementById("visualStageFullscreenBtn");
-const visualStageMinimizeBtn = document.getElementById("visualStageMinimizeBtn");
-const visualStageCloseBtn = document.getElementById("visualStageCloseBtn");
 
 const settingsFields = {
   GOOGLE_PLAYLIST_ID: document.getElementById("cfgGooglePlaylistId"),
@@ -85,9 +76,6 @@ let mediaSourceNode = null;
 let fxNodes = null;
 let frequencyData = null;
 let flameLevels = [];
-let visualStageEntities = [];
-let visualStageMode = "hidden";
-let visualStageInfoText = "";
 let isScrubbingMix = false;
 let isScrubbingTrack = false;
 let settingsState = null;
@@ -741,327 +729,6 @@ function resizeFlamegraphCanvas() {
   flameCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-function resizeVisualStageCanvas() {
-  if (!visualStageCanvas || !visualStageCtx) {
-    return;
-  }
-
-  const dpr = window.devicePixelRatio || 1;
-  const rect = visualStageCanvas.getBoundingClientRect();
-  const width = Math.max(1, Math.floor(rect.width * dpr));
-  const height = Math.max(1, Math.floor(rect.height * dpr));
-
-  if (visualStageCanvas.width !== width || visualStageCanvas.height !== height) {
-    visualStageCanvas.width = width;
-    visualStageCanvas.height = height;
-  }
-
-  visualStageCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-}
-
-function ensureVisualStageEntities() {
-  const desiredCount = visualStageMode === "minimized" ? 12 : 22;
-  if (visualStageEntities.length === desiredCount) {
-    return;
-  }
-
-  visualStageEntities = Array.from({ length: desiredCount }, (_unused, index) => ({
-    phase: index * 0.63 + Math.random() * 0.45,
-    drift: 0.35 + Math.random() * 1.2,
-    orbit: 0.24 + Math.random() * 0.66,
-    sway: 0.4 + Math.random() * 1.4,
-    radius: 20 + Math.random() * 54,
-    size: 10 + Math.random() * 28,
-    hueShift: Math.random() * 120,
-    shape: ["circle", "square", "diamond"][index % 3],
-  }));
-}
-
-function isVisualStageFullscreen() {
-  return document.fullscreenElement === visualStagePanel;
-}
-
-function syncVisualStageUi() {
-  if (!visualStagePanel) {
-    return;
-  }
-
-  visualStagePanel.dataset.mode = visualStageMode;
-  visualStagePanel.setAttribute("aria-hidden", visualStageMode === "hidden" ? "true" : "false");
-  document.body.classList.toggle("visual-stage-active", visualStageMode !== "hidden");
-
-  if (visualModeBtn) {
-    visualModeBtn.textContent = visualStageMode === "hidden" ? "Visual Mode" : "Hide Visuals";
-  }
-
-  if (visualStageMinimizeBtn) {
-    visualStageMinimizeBtn.textContent = visualStageMode === "minimized" ? "Restore" : "Minimize";
-  }
-
-  if (visualStageFullscreenBtn) {
-    visualStageFullscreenBtn.textContent = isVisualStageFullscreen() ? "Exit Full Screen" : "Full Screen";
-  }
-
-  if (visualStageHintEl) {
-    visualStageHintEl.textContent = visualStageMode === "minimized"
-      ? "Mini stage stays docked in the corner. Restore or go full screen any time."
-      : "Moving circles, diamonds, and color fields pulse from bass energy and track tempo.";
-  }
-}
-
-async function setVisualStageMode(nextMode) {
-  if (!visualStagePanel) {
-    return;
-  }
-
-  const wantsFullscreenExit = isVisualStageFullscreen() && nextMode !== "open";
-  if (wantsFullscreenExit) {
-    try {
-      await document.exitFullscreen();
-    } catch {
-      // no-op
-    }
-  }
-
-  visualStageMode = nextMode;
-  syncVisualStageUi();
-  ensureVisualStageEntities();
-
-  if (visualStageMode !== "hidden") {
-    resizeVisualStageCanvas();
-    ensureVisualizerNodes().catch(() => {
-      // no-op
-    });
-  }
-}
-
-async function toggleVisualStageVisibility() {
-  const nextMode = visualStageMode === "hidden" ? "open" : "hidden";
-  await setVisualStageMode(nextMode);
-}
-
-async function toggleVisualStageFullscreen() {
-  if (!visualStagePanel) {
-    return;
-  }
-
-  if (visualStageMode === "hidden") {
-    await setVisualStageMode("open");
-  }
-
-  if (isVisualStageFullscreen()) {
-    try {
-      await document.exitFullscreen();
-    } catch {
-      // no-op
-    }
-    syncVisualStageUi();
-    return;
-  }
-
-  try {
-    await visualStagePanel.requestFullscreen();
-  } catch (err) {
-    appendLog(`Full screen failed: ${err.message}`, "stderr");
-  }
-
-  syncVisualStageUi();
-}
-
-async function toggleVisualStageMinimize() {
-  if (visualStageMode === "hidden") {
-    await setVisualStageMode("minimized");
-    return;
-  }
-
-  if (visualStageMode === "minimized") {
-    await setVisualStageMode("open");
-    return;
-  }
-
-  await setVisualStageMode("minimized");
-}
-
-function drawVisualGlyph({ ctx, shape, x, y, size, rotation, fillStyle, strokeStyle, strokeWidth }) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(rotation);
-  ctx.fillStyle = fillStyle;
-  ctx.strokeStyle = strokeStyle;
-  ctx.lineWidth = strokeWidth;
-  ctx.beginPath();
-
-  if (shape === "circle") {
-    ctx.arc(0, 0, size, 0, Math.PI * 2);
-  } else if (shape === "diamond") {
-    ctx.moveTo(0, -size * 1.14);
-    ctx.lineTo(size * 0.92, 0);
-    ctx.lineTo(0, size * 1.14);
-    ctx.lineTo(-size * 0.92, 0);
-    ctx.closePath();
-  } else {
-    ctx.rect(-size, -size, size * 2, size * 2);
-  }
-
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawVisualStage(nowMs) {
-  if (!visualStageCanvas || !visualStageCtx || visualStageMode === "hidden") {
-    return;
-  }
-
-  resizeVisualStageCanvas();
-  ensureVisualStageEntities();
-
-  const ctx = visualStageCtx;
-  const w = Math.max(1, visualStageCanvas.clientWidth);
-  const h = Math.max(1, visualStageCanvas.clientHeight);
-  const active = Boolean(session && !preparing && !playback.paused && !playback.ended);
-  const bpm = getCurrentTrackBpm();
-  const beat = (Number(playback.positionSec || 0) * bpm * Math.PI * 2) / 60;
-  const tempoPulse = active ? Math.pow((Math.sin(beat - Math.PI / 2) + 1) * 0.5, 2.2) : 0.12;
-  const centerX = w * 0.5;
-  const centerY = h * 0.52;
-  const time = nowMs * 0.00052;
-
-  let bassLevel = 0;
-  let midLevel = 0;
-  let highLevel = 0;
-  let usableBins = 0;
-
-  if (active && analyserNode && frequencyData) {
-    try {
-      analyserNode.getByteFrequencyData(frequencyData);
-      usableBins = Math.max(16, Math.floor(frequencyData.length * 0.92));
-      const bassBins = Math.max(4, Math.floor(usableBins * 0.1));
-      const midStart = bassBins;
-      const midEnd = Math.max(midStart + 4, Math.floor(usableBins * 0.46));
-      const highStart = midEnd;
-
-      let bassSum = 0;
-      let midSum = 0;
-      let highSum = 0;
-
-      for (let i = 0; i < bassBins; i += 1) {
-        bassSum += frequencyData[i] || 0;
-      }
-      for (let i = midStart; i < midEnd; i += 1) {
-        midSum += frequencyData[i] || 0;
-      }
-      for (let i = highStart; i < usableBins; i += 1) {
-        highSum += frequencyData[i] || 0;
-      }
-
-      bassLevel = bassSum / Math.max(1, bassBins * 255);
-      midLevel = midSum / Math.max(1, (midEnd - midStart) * 255);
-      highLevel = highSum / Math.max(1, (usableBins - highStart) * 255);
-    } catch {
-      bassLevel = 0;
-      midLevel = 0;
-      highLevel = 0;
-      usableBins = 0;
-    }
-  }
-
-  if (!active) {
-    bassLevel = 0.18 + Math.sin(time * 1.7) * 0.04;
-    midLevel = 0.12 + Math.sin(time * 1.2 + 0.5) * 0.05;
-    highLevel = 0.16 + Math.cos(time * 1.8 + 1.2) * 0.05;
-  }
-
-  const energy = clamp(0.18 + bassLevel * 0.9 + midLevel * 0.55 + highLevel * 0.35, 0, 1.35);
-  const hueBase = (nowMs * 0.016 + bassLevel * 70 + highLevel * 120) % 360;
-
-  const bg = ctx.createLinearGradient(0, 0, w, h);
-  bg.addColorStop(0, `hsla(${(hueBase + 210) % 360}, 48%, 9%, 1)`);
-  bg.addColorStop(0.45, `hsla(${(hueBase + 110) % 360}, 58%, 7%, 1)`);
-  bg.addColorStop(1, `hsla(${(hueBase + 290) % 360}, 52%, 6%, 1)`);
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, w, h);
-
-  const bloom = ctx.createRadialGradient(centerX, centerY, 12, centerX, centerY, Math.max(w, h) * 0.48);
-  bloom.addColorStop(0, `hsla(${(hueBase + 20) % 360}, 92%, 66%, ${0.18 + bassLevel * 0.18 + tempoPulse * 0.1})`);
-  bloom.addColorStop(0.35, `hsla(${(hueBase + 120) % 360}, 88%, 54%, ${0.1 + midLevel * 0.12})`);
-  bloom.addColorStop(1, "rgba(0, 0, 0, 0)");
-  ctx.fillStyle = bloom;
-  ctx.fillRect(0, 0, w, h);
-
-  ctx.save();
-  ctx.globalAlpha = 0.14 + highLevel * 0.14;
-  ctx.strokeStyle = `hsla(${(hueBase + 65) % 360}, 78%, 72%, 0.42)`;
-  ctx.lineWidth = 1;
-  for (let x = -w; x < w * 2; x += 42) {
-    const shift = Math.sin(time * 0.8 + x * 0.005) * 26;
-    ctx.beginPath();
-    ctx.moveTo(x + shift, 0);
-    ctx.lineTo(x - shift, h);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  const ringCount = visualStageMode === "minimized" ? 3 : 5;
-  for (let ringIndex = 0; ringIndex < ringCount; ringIndex += 1) {
-    const radius = 42 + ringIndex * 46 + tempoPulse * 18 + bassLevel * 40;
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-    ctx.strokeStyle = `hsla(${(hueBase + ringIndex * 26) % 360}, 88%, ${62 - ringIndex * 5}%, ${0.34 - ringIndex * 0.04})`;
-    ctx.lineWidth = Math.max(1.2, 3.6 - ringIndex * 0.35 + bassLevel * 1.8);
-    ctx.stroke();
-  }
-
-  ctx.save();
-  ctx.globalCompositeOperation = "screen";
-  for (let i = 0; i < visualStageEntities.length; i += 1) {
-    const entity = visualStageEntities[i];
-    const binIndex = usableBins ? Math.floor((i / visualStageEntities.length) * (usableBins - 1)) : -1;
-    const binEnergy = binIndex >= 0 ? (frequencyData[binIndex] || 0) / 255 : 0.18 + Math.sin(time * entity.drift + entity.phase) * 0.05;
-    const orbitRadius = Math.min(w, h) * entity.orbit * 0.42 + bassLevel * 24 + binEnergy * 44;
-    const x = centerX + Math.cos(time * entity.drift + entity.phase) * orbitRadius + Math.sin(time * 1.7 + entity.phase) * entity.radius;
-    const y = centerY + Math.sin(time * entity.sway + entity.phase) * orbitRadius * 0.58 + Math.cos(time * 1.2 + entity.phase * 1.4) * entity.radius * 0.6;
-    const size = entity.size * (0.42 + binEnergy * 1.5 + tempoPulse * 0.35);
-    const hue = (hueBase + entity.hueShift + i * 7) % 360;
-    drawVisualGlyph({
-      ctx,
-      shape: entity.shape,
-      x,
-      y,
-      size,
-      rotation: time * 0.9 + entity.phase,
-      fillStyle: `hsla(${hue}, 88%, ${56 + binEnergy * 16}%, ${0.15 + binEnergy * 0.36})`,
-      strokeStyle: `hsla(${(hue + 38) % 360}, 92%, 78%, ${0.32 + binEnergy * 0.24})`,
-      strokeWidth: Math.max(1, 1.2 + binEnergy * 2.1),
-    });
-  }
-  ctx.restore();
-
-  ctx.save();
-  ctx.fillStyle = `hsla(${(hueBase + 24) % 360}, 100%, 72%, ${0.18 + tempoPulse * 0.16 + bassLevel * 0.2})`;
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, 18 + tempoPulse * 28 + bassLevel * 36, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
-  const currentTrack = session && currentIndex >= 0 && currentIndex < session.tracks.length ? session.tracks[currentIndex] : null;
-  const stageInfoText = currentTrack
-    ? `${currentTrack.title} | ${formatDuration(playback.positionSec)} | ${bpm.toFixed(2)} BPM`
-    : "Visualizer ready. Start playback to sync motion to the beat.";
-
-  if (visualStageStatusEl && stageInfoText !== visualStageInfoText) {
-    visualStageInfoText = stageInfoText;
-    visualStageStatusEl.textContent = stageInfoText;
-  }
-
-  ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
-  ctx.font = `${visualStageMode === "minimized" ? 12 : 14}px Sora`;
-  ctx.fillText(active ? "LIVE PULSE" : "IDLE PULSE", 20, 28);
-  ctx.fillStyle = "rgba(182, 201, 228, 0.88)";
-  ctx.font = `${visualStageMode === "minimized" ? 10 : 12}px JetBrains Mono`;
-  ctx.fillText(`bass ${bassLevel.toFixed(2)} | mid ${midLevel.toFixed(2)} | high ${highLevel.toFixed(2)}`, 20, 48);
-}
-
 function drawFlamegraph(nowMs) {
   if (!flameCanvas || !flameCtx) {
     return;
@@ -1152,23 +819,24 @@ function drawFlamegraph(nowMs) {
     const grad = flameCtx.createLinearGradient(0, y, 0, h);
     grad.addColorStop(0, active ? "#fff1bd" : "#6a737d");
     grad.addColorStop(0.35, active ? "#ff9f5a" : "#55606c");
-    grad.addColorStop(0.8, active ? "#ff5a36" : "#414b59");
-    grad.addColorStop(1, active ? "#7a1220" : "#2b3341");
-
+    grad.addColorStop(0.72, active ? "#ff5d45" : "#39424b");
+    grad.addColorStop(1, active ? "#3b0f11" : "#182028");
     flameCtx.fillStyle = grad;
     flameCtx.fillRect(x, y, barW, barH);
   }
 
   if (active) {
-    const glowAlpha = Math.min(0.52, 0.14 + bassLevel * 0.42);
-    flameCtx.fillStyle = `rgba(255, 225, 160, ${glowAlpha})`;
-    flameCtx.fillRect(0, h - 2, w, 2);
+    flameCtx.strokeStyle = `rgba(255, 255, 255, ${0.08 + bassLevel * 0.12})`;
+    flameCtx.lineWidth = 1;
+    flameCtx.beginPath();
+    flameCtx.moveTo(0, h * (0.3 - bassLevel * 0.08));
+    flameCtx.lineTo(w, h * (0.3 - bassLevel * 0.08));
+    flameCtx.stroke();
   }
 }
 
 function flamegraphLoop(nowMs) {
   drawFlamegraph(nowMs || performance.now());
-  drawVisualStage(nowMs || performance.now());
   flameRaf = window.requestAnimationFrame(flamegraphLoop);
 }
 
@@ -1527,50 +1195,6 @@ nextBtn.addEventListener("click", () => {
   });
 });
 
-if (visualModeBtn) {
-  visualModeBtn.addEventListener("click", () => {
-    toggleVisualStageVisibility().catch((err) => {
-      appendLog(`Visual stage toggle failed: ${err.message}`, "stderr");
-    });
-  });
-}
-
-if (visualStageFullscreenBtn) {
-  visualStageFullscreenBtn.addEventListener("click", () => {
-    toggleVisualStageFullscreen().catch((err) => {
-      appendLog(`Visual stage fullscreen failed: ${err.message}`, "stderr");
-    });
-  });
-}
-
-if (visualStageMinimizeBtn) {
-  visualStageMinimizeBtn.addEventListener("click", () => {
-    toggleVisualStageMinimize().catch((err) => {
-      appendLog(`Visual stage minimize failed: ${err.message}`, "stderr");
-    });
-  });
-}
-
-if (visualStageCloseBtn) {
-  visualStageCloseBtn.addEventListener("click", () => {
-    setVisualStageMode("hidden").catch((err) => {
-      appendLog(`Visual stage close failed: ${err.message}`, "stderr");
-    });
-  });
-}
-
-if (visualStagePanel) {
-  visualStagePanel.addEventListener("dblclick", () => {
-    if (visualStageMode === "minimized") {
-      setVisualStageMode("open").catch(() => {
-        // no-op
-      });
-    }
-  });
-}
-
-document.addEventListener("fullscreenchange", syncVisualStageUi);
-
 window.desktopDJ.onLog((payload) => {
   appendLog(payload.line, payload.stream);
 });
@@ -1627,12 +1251,9 @@ window.desktopDJ.onPlaybackState((payload) => {
     resizeFlamegraphCanvas();
     window.addEventListener("resize", () => {
       resizeFlamegraphCanvas();
-      resizeVisualStageCanvas();
     });
     flameRaf = window.requestAnimationFrame(flamegraphLoop);
   }
-
-  syncVisualStageUi();
 
   setStatus("Desktop app ready. Loading settings and cached session...");
 

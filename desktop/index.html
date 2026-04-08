@@ -108,7 +108,6 @@
         <button id="pauseBtn">Pause</button>
         <button id="prevBtn">Prev Song</button>
         <button id="nextBtn">Next Song</button>
-        <button id="visualModeBtn" class="accent">Visual Mode</button>
         <button id="exportBtn">Export Mix</button>
         <button id="resetBtn" class="danger">Reset</button>
       </section>
@@ -222,28 +221,6 @@
         <pre id="logOutput" class="console"></pre>
       </section>
     </div>
-
-    <section id="visualStagePanel" class="visual-stage-panel" data-mode="hidden" aria-hidden="true">
-      <div class="visual-stage-head">
-        <div>
-          <p class="visual-stage-kicker">Virtual DJ Stage</p>
-          <h2>Beat Reactive Visuals</h2>
-        </div>
-
-        <div class="visual-stage-actions">
-          <button id="visualStageFullscreenBtn" type="button">Full Screen</button>
-          <button id="visualStageMinimizeBtn" type="button">Minimize</button>
-          <button id="visualStageCloseBtn" type="button" class="danger">Close</button>
-        </div>
-      </div>
-
-      <canvas id="visualStageCanvas" class="visual-stage-canvas"></canvas>
-
-      <div class="visual-stage-foot">
-        <p id="visualStageStatus">Visualizer is idle. Start playback to lock motion to the deck rhythm.</p>
-        <p id="visualStageHint">Moving circles, diamonds, and color fields pulse from bass energy and track tempo.</p>
-      </div>
-    </section>
 
     <script src="renderer.js"></script>
   </body>
